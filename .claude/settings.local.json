@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from main import CollectorApp; print\\('Import OK'\\)\")",
+      "Bash(../.venv/Scripts/python.exe -c \"from main import CollectorApp; print\\('Import OK'\\)\")",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/core/metrics.py)",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/core/base_plugin.py)",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/main.py)",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/plugins/host_plugin.py)",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/plugins/gpu_plugin.py)",
+      "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/plugins/k8s_plugin.py)",
+      "Bash(../.venv/Scripts/python.exe:*)",
+      "Bash(ls:*)",
+      "Bash(dir \"D:\\\\Project\\\\CpnQosPro\\\\collector\")"
+    ]
+  }
+}
