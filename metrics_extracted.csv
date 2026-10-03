@@ -1,13 +1,6 @@
 ﻿指标名,指标类型,信息类型,含义
-node_cpu_core_throttles_total,counter,CPU,该CPU核心被限流的次数
 node_cpu_frequency_max_hertz,gauge,CPU,CPU线程最高频率（赫兹）
 node_cpu_frequency_min_hertz,gauge,CPU,CPU线程最低频率（赫兹）
-node_cpu_guest_seconds_total,counter,CPU,CPU在各模式下运行虚拟机(guest)所花费的秒数
-node_cpu_package_throttles_total,counter,CPU,该CPU封装(物理CPU)被限流的次数
-node_cpu_scaling_frequency_hertz,gauge,CPU,当前CPU线程缩放后的频率（赫兹）
-node_cpu_scaling_frequency_max_hertz,gauge,CPU,CPU线程缩放后的最高频率（赫兹）
-node_cpu_scaling_frequency_min_hertz,gauge,CPU,CPU线程缩放后的最低频率（赫兹）
-node_cpu_scaling_governor,gauge,CPU,当前启用的CPU频率调节器(governor)
 node_cpu_seconds_total,counter,CPU,CPU在各模式下运行所花费的秒数
 node_context_switches_total,counter,CPU(上下文切换),上下文切换总次数
 node_intr_total,counter,中断,已服务的中断总次数
@@ -34,92 +27,14 @@ node_disk_io_time_seconds_total,counter,磁盘,进行I/O消耗的总秒数
 node_boot_time_seconds,gauge,系统信息,节点启动时间（Unix时间戳）
 node_os_info,gauge,系统信息,常量值为1的指标，以操作系统名称、版本、ID等(OS信息)为标签
 node_time_seconds,gauge,系统信息,自纪元(1970)以来的系统时间（秒）
-,,,
 node_network_receive_bytes_total,counter,网络,网络设备统计：接收字节数
 node_network_transmit_bytes_total,counter,网络,网络设备统计：发送字节数
-,,,
-,,,
-,,,
-,,,
-,,,
-,,,
-node_netstat_Icmp6_InErrors,untyped,网络(Netstat),Netstat统计：IPv6 ICMP接收错误数
-node_netstat_Icmp6_InMsgs,untyped,网络(Netstat),Netstat统计：IPv6 ICMP接收消息数
-node_netstat_Icmp6_OutMsgs,untyped,网络(Netstat),Netstat统计：IPv6 ICMP发送消息数
-node_netstat_Icmp_InErrors,untyped,网络(Netstat),Netstat统计：IPv4 ICMP接收错误数
-node_netstat_Icmp_InMsgs,untyped,网络(Netstat),Netstat统计：IPv4 ICMP接收消息数
-node_netstat_Icmp_OutMsgs,untyped,网络(Netstat),Netstat统计：IPv4 ICMP发送消息数
-node_netstat_Ip6_InOctets,untyped,网络(Netstat),Netstat统计：IPv6接收字节数
-node_netstat_Ip6_OutOctets,untyped,网络(Netstat),Netstat统计：IPv6发送字节数
-node_netstat_IpExt_InOctets,untyped,网络(Netstat),Netstat统计：IPv4扩展接收字节数
-node_netstat_IpExt_OutOctets,untyped,网络(Netstat),Netstat统计：IPv4扩展发送字节数
-node_netstat_Ip_Forwarding,untyped,网络(Netstat),Netstat统计：IPv4转发开关
-node_netstat_TcpExt_ListenDrops,untyped,网络(Netstat),Netstat统计：监听队列丢弃数
-node_netstat_TcpExt_ListenOverflows,untyped,网络(Netstat),Netstat统计：监听队列溢出数
-node_netstat_TcpExt_SyncookiesFailed,untyped,网络(Netstat),Netstat统计：SYN cookie验证失败数
-node_netstat_TcpExt_SyncookiesRecv,untyped,网络(Netstat),Netstat统计：接收的SYN cookie数
-node_netstat_TcpExt_SyncookiesSent,untyped,网络(Netstat),Netstat统计：发送的SYN cookie数
-node_netstat_TcpExt_TCPOFOQueue,untyped,网络(Netstat),Netstat统计：TCP乱序重组队列(OFQ)包数
-node_netstat_TcpExt_TCPRcvQDrop,untyped,网络(Netstat),Netstat统计：TCP接收队列丢弃数
-node_netstat_TcpExt_TCPSynRetrans,untyped,网络(Netstat),Netstat统计：TCP SYN重传次数
-node_netstat_TcpExt_TCPTimeouts,untyped,网络(Netstat),Netstat统计：TCP超时次数
-node_netstat_Tcp_ActiveOpens,untyped,网络(Netstat),Netstat统计：TCP主动打开连接数
 node_netstat_Tcp_CurrEstab,untyped,网络(Netstat),Netstat统计：当前已建立TCP连接数
-node_netstat_Tcp_InErrs,untyped,网络(Netstat),Netstat统计：TCP接收错误数
 node_netstat_Tcp_InSegs,untyped,网络(Netstat),Netstat统计：TCP接收段数
-node_netstat_Tcp_OutRsts,untyped,网络(Netstat),Netstat统计：TCP发送RST数
 node_netstat_Tcp_OutSegs,untyped,网络(Netstat),Netstat统计：TCP发送段数
-node_netstat_Tcp_PassiveOpens,untyped,网络(Netstat),Netstat统计：TCP被动打开连接数
-node_netstat_Tcp_RetransSegs,untyped,网络(Netstat),Netstat统计：TCP重传段数
-node_netstat_Udp6_InDatagrams,untyped,网络(Netstat),Netstat统计：IPv6 UDP接收数据报数
-node_netstat_Udp6_InErrors,untyped,网络(Netstat),Netstat统计：IPv6 UDP接收错误数
-node_netstat_Udp6_NoPorts,untyped,网络(Netstat),Netstat统计：IPv6 UDP无端口数据报数
-node_netstat_Udp6_OutDatagrams,untyped,网络(Netstat),Netstat统计：IPv6 UDP发送数据报数
-node_netstat_Udp6_RcvbufErrors,untyped,网络(Netstat),Netstat统计：IPv6 UDP接收缓冲区错误数
-node_netstat_Udp6_SndbufErrors,untyped,网络(Netstat),Netstat统计：IPv6 UDP发送缓冲区错误数
-node_netstat_UdpLite6_InErrors,untyped,网络(Netstat),Netstat统计：IPv6 UDPLite接收错误数
-node_netstat_UdpLite_InErrors,untyped,网络(Netstat),Netstat统计：IPv4 UDPLite接收错误数
 node_netstat_Udp_InDatagrams,untyped,网络(Netstat),Netstat统计：IPv4 UDP接收数据报数
-node_netstat_Udp_InErrors,untyped,网络(Netstat),Netstat统计：IPv4 UDP接收错误数
-node_netstat_Udp_NoPorts,untyped,网络(Netstat),Netstat统计：IPv4 UDP无端口数据报数
 node_netstat_Udp_OutDatagrams,untyped,网络(Netstat),Netstat统计：IPv4 UDP发送数据报数
-node_netstat_Udp_RcvbufErrors,untyped,网络(Netstat),Netstat统计：IPv4 UDP接收缓冲区错误数
-node_netstat_Udp_SndbufErrors,untyped,网络(Netstat),Netstat统计：IPv4 UDP发送缓冲区错误数
-,,,
-node_sockstat_FRAG6_inuse,gauge,网络(Sockstat),处于inuse状态的IPv6分片(FRAG6)套接字数
-node_sockstat_FRAG6_memory,gauge,网络(Sockstat),处于memory状态的IPv6分片(FRAG6)套接字内存
-node_sockstat_FRAG_inuse,gauge,网络(Sockstat),处于inuse状态的IPv4分片(FRAG)套接字数
-node_sockstat_FRAG_memory,gauge,网络(Sockstat),处于memory状态的IPv4分片(FRAG)套接字内存
-node_sockstat_RAW6_inuse,gauge,网络(Sockstat),处于inuse状态的IPv6原始(RAW6)套接字数
-node_sockstat_RAW_inuse,gauge,网络(Sockstat),处于inuse状态的IPv4原始(RAW)套接字数
-node_sockstat_TCP6_inuse,gauge,网络(Sockstat),处于inuse状态的TCP6套接字数
-node_sockstat_TCP_alloc,gauge,网络(Sockstat),处于alloc状态的TCP套接字数
-node_sockstat_TCP_inuse,gauge,网络(Sockstat),处于inuse状态的TCP套接字数
-node_sockstat_TCP_mem,gauge,网络(Sockstat),处于mem状态的TCP套接字内存页数
-node_sockstat_TCP_mem_bytes,gauge,网络(Sockstat),处于mem_bytes状态的TCP套接字内存(字节)
-node_sockstat_TCP_orphan,gauge,网络(Sockstat),处于orphan(孤儿)状态的TCP套接字数
-node_sockstat_TCP_tw,gauge,网络(Sockstat),处于TIME_WAIT(tw)状态的TCP套接字数
-node_sockstat_UDP6_inuse,gauge,网络(Sockstat),处于inuse状态的UDP6套接字数
-node_sockstat_UDPLITE6_inuse,gauge,网络(Sockstat),处于inuse状态的UDPLITE6套接字数
-node_sockstat_UDPLITE_inuse,gauge,网络(Sockstat),处于inuse状态的UDPLITE套接字数
-node_sockstat_UDP_inuse,gauge,网络(Sockstat),处于inuse状态的UDP套接字数
-node_sockstat_UDP_mem,gauge,网络(Sockstat),处于mem状态的UDP套接字内存页数
-node_sockstat_UDP_mem_bytes,gauge,网络(Sockstat),处于mem_bytes状态的UDP套接字内存(字节)
 node_sockstat_sockets_used,gauge,网络(Sockstat),正在使用的IPv4套接字总数
-,,,
-node_softnet_backlog_len,gauge,网络(Softnet),Softnet背压队列长度
-node_softnet_cpu_collision_total,counter,网络(Softnet),发送时获取设备锁发生冲突的次数
-node_softnet_dropped_total,counter,网络(Softnet),丢弃的数据包数
-node_softnet_flow_limit_count_total,counter,网络(Softnet),达到流限制的次数
-node_softnet_processed_total,counter,网络(Softnet),已处理的数据包数
-node_softnet_received_rps_total,counter,网络(Softnet),CPU被唤醒接收RPS的次数
-node_softnet_times_squeezed_total,counter,网络(Softnet),处理数据包超出配额(quota)的次数
-,,,
-node_udp_queues,gauge,网络(UDP队列),内核为UDP数据报分配的内存（字节）
-,,,
-node_nf_conntrack_entries,gauge,网络(nf_conntrack),连接跟踪当前分配的流表项数量
-node_nf_conntrack_entries_limit,gauge,网络(nf_conntrack),连接跟踪表的最大容量
-,,,
 node_schedstat_running_seconds_total,counter,调度器,CPU运行某进程所花费的秒数
 node_schedstat_timeslices_total,counter,调度器,CPU执行的时间片总数
 node_schedstat_waiting_seconds_total,counter,调度器,进程等待该CPU所花费的秒数
@@ -129,16 +44,3 @@ node_load5,gauge,负载,5分钟平均负载
 node_forks_total,counter,进程,fork系统调用总次数
 node_procs_blocked,gauge,进程,阻塞等待I/O完成的进程数
 node_procs_running,gauge,进程,处于可运行(runnable)状态的进程数
-,,,
-node_exporter_build_info,gauge,Exporter信息,常量值为1的指标，以node_exporter构建时的版本、修订号、分支、Go版本及操作系统(goos/goarch)为标签
-process_cpu_seconds_total,counter,Exporter进程,进程消耗的用户态和内核态CPU总时间（秒）
-process_max_fds,gauge,Exporter进程,打开的文件描述符最大数量
-process_network_receive_bytes_total,counter,Exporter进程,进程通过网络接收的字节数
-process_network_transmit_bytes_total,counter,Exporter进程,进程通过网络发送的字节数
-process_open_fds,gauge,Exporter进程,已打开的文件描述符数量
-process_resident_memory_bytes,gauge,Exporter进程,常驻内存大小（字节）
-process_start_time_seconds,gauge,Exporter进程,进程自Unix纪元以来的启动时间（秒）
-process_virtual_memory_bytes,gauge,Exporter进程,虚拟内存大小（字节）
-process_virtual_memory_max_bytes,gauge,Exporter进程,可用的最大虚拟内存量（字节）
-node_scrape_collector_duration_seconds,gauge,Exporter采集,node_exporter：单次采集器抓取耗时
-node_scrape_collector_success,gauge,Exporter采集,node_exporter：采集器是否抓取成功
