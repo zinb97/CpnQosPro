@@ -11,19 +11,11 @@ import glob
 
 
 class MetricsCollector:
-    """Linux指标采集器"""
-
     def __init__(self):
         self._data = {}  # 所有采集的原始数据
 
     def collect(self, per_cpu=False) -> dict:
-        """收集所有指标
-
-        Args:
-            per_cpu: 是否读取每个 CPU 核心的详细数据，默认只读总计数据
-        """
         self._collect_all(per_cpu=per_cpu)
-        # return self._build_metrics()
         return self._data
 
     def _collect_all(self, per_cpu=False):
@@ -345,92 +337,6 @@ class MetricsCollector:
         except:
             pass
         return mounts
-
-    def _build_metrics(self) -> dict:
-        """构建指标字典"""
-        data = self._data
-        metrics = {}
-
-        # CPU stat
-        metrics['node_cpu_stat'] = data.get('cpu_stat', {})
-
-        # Load average
-        metrics['node_loadavg'] = data.get('loadavg', {})
-
-        # Memory
-        meminfo = data.get('meminfo', {})
-        metrics['node_memory_MemFree_bytes'] = meminfo.get('MemFree', 0)
-        metrics['node_memory_MemTotal_bytes'] = meminfo.get('MemTotal', 0)
-        metrics['node_memory_SwapFree_bytes'] = meminfo.get('SwapFree', 0)
-        metrics['node_memory_SwapTotal_bytes'] = meminfo.get('SwapTotal', 0)
-
-        # Disk stats
-        disk_info = {}
-        for disk in data.get('diskstats', []):
-            dev = disk['device']
-            if dev.startswith('loop') or dev.startswith('ram'):
-                continue
-            disk_info[dev] = {
-                'reads_completed': disk['reads_completed'],
-                'writes_completed': disk['writes_completed'],
-                'io_time_ms': disk['io_time_ms'],
-                'sectors_read': disk['sectors_read'],
-                'sectors_written': disk['sectors_written'],
-            }
-        metrics['node_disk_stats'] = disk_info
-
-        # Network
-        metrics['node_network'] = data.get('network', {})
-
-        # OS info
-        metrics['node_os_info'] = data.get('os_info', {})
-
-        # SNMP
-        metrics['node_snmp'] = data.get('snmp', {})
-
-        # Sockstat
-        metrics['node_sockstat'] = data.get('sockstat', {})
-
-        # Netstat
-        metrics['node_netstat'] = data.get('netstat', {})
-
-        # hwmon
-        hwmon_power = {}
-        hwmon_temp = {}
-        for hw in data.get('hwmon', []):
-            name = hw['name']
-            if hw['type'] == 'power':
-                hwmon_power[name] = hw['value']
-            elif hw['type'] == 'temp':
-                hwmon_temp[name] = hw['value']
-        metrics['node_hwmon_power'] = hwmon_power
-        metrics['node_hwmon_temp'] = hwmon_temp
-
-        # Thermal
-        thermal = {}
-        for zone in data.get('thermal', []):
-            thermal[zone['zone']] = zone['temp']
-        metrics['node_thermal'] = thermal
-
-        # Process stats
-        metrics['node_procs'] = data.get('loadproc', {})
-
-        # Boot time
-        metrics['node_boot_time_seconds'] = data.get('boot_time', 0)
-
-        # File descriptor
-        metrics['node_filefd'] = data.get('filefd', {})
-
-        # DMI
-        metrics['node_dmi_info'] = data.get('dmi', {})
-
-        # Mounts
-        metrics['node_mounts'] = data.get('mounts', [])
-
-        # Timestamp
-        metrics['node_time_seconds'] = int(time.time())
-
-        return metrics
 
     def to_json(self) -> str:
         """输出为 JSON 格式"""
