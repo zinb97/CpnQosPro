@@ -9,6 +9,8 @@ import time
 import json
 import glob
 
+from coverage.collector import Collector
+
 
 class MetricsCollector:
     def __init__(self):
@@ -290,6 +292,7 @@ class MetricsCollector:
                 val = int(self._read_file(temp_file)) if os.path.exists(temp_file) else None
                 if val and type_:
                     zones.append({
+                        'zone': zone_path[-1],
                         'type': type_,
                         'temp': val / 1000,
                     })
@@ -342,7 +345,144 @@ class MetricsCollector:
         """输出为 JSON 格式"""
         return json.dumps(self.collect(), indent=4, ensure_ascii=False)
 
+    def to_prometheus(self, per_cpu=False) -> str:
+        """输出为 Prometheus 文本格式
+
+        Args:
+            per_cpu: 是否包含每个 CPU 核心的详细数据
+        """
+        data = self.collect(per_cpu=per_cpu)
+        lines = []
+
+        # uname info
+
+
+
+        # OS info
+        os_info = data.get('os_info', {})
+        print(os_info)
+        if os_info:
+            labels = ','.join(f'{k}="{v}"' for k, v in os_info.items())
+            lines.append(f'node_os_info{{{labels}}} 1')
+
+        # DMI info
+        dmi = data.get('dmi', {})
+        if dmi:
+            labels = ','.join(f'{k}="{v}"' for k, v in dmi.items())
+            lines.append(f'node_dmi_info{{{labels}}} 1')
+
+        # CPU stat
+        cpu_stat = data.get('cpu_stat', {})
+        for cpu, vals in cpu_stat.items():
+            if isinstance(vals, dict) and 'user' in vals:
+                if cpu == 'cpu':
+                    lines.append(f'node_cpu_seconds_total{{mode="user"}} {vals.get("user", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="nice"}} {vals.get("nice", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="system"}} {vals.get("system", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="idle"}} {vals.get("idle", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="iowait"}} {vals.get("iowait", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="irq"}} {vals.get("irq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="softirq"}} {vals.get("softirq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{mode="steal"}} {vals.get("steal", 0)}')
+                elif per_cpu and cpu.startswith('cpu'):
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="user"}} {vals.get("user", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="nice"}} {vals.get("nice", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="system"}} {vals.get("system", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="idle"}} {vals.get("idle", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="iowait"}} {vals.get("iowait", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="irq"}} {vals.get("irq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="softirq"}} {vals.get("softirq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="steal"}} {vals.get("steal", 0)}')
+            elif isinstance(vals, (int, float)):
+                if cpu == 'ctxt':
+                    lines.append(f'node_context_switches_total {vals}')
+                elif cpu == 'btime':
+                    lines.append(f'node_boot_time_seconds {vals}')
+                elif cpu == 'processes':
+                    lines.append(f'node_forks_total {vals}')
+                elif cpu == 'procs_running':
+                    lines.append(f'node_procs_running {vals}')
+                elif cpu == 'procs_blocked':
+                    lines.append(f'node_procs_blocked {vals}')
+
+        # Load average
+        loadavg = data.get('loadavg', {})
+        if loadavg:
+            lines.append(f'node_load1 {loadavg.get("load1", 0)}')
+            lines.append(f'node_load5 {loadavg.get("load5", 0)}')
+            lines.append(f'node_load15 {loadavg.get("load15", 0)}')
+            lines.append(f'node_loadavg_running_process {loadavg.get("running_process", 0)}')
+            lines.append(f'node_loadavg_total_process {loadavg.get("total_process", 0)}')
+
+        # Memory
+        meminfo = data.get('meminfo', {})
+        if meminfo:
+            lines.append(f'node_memory_MemFree_bytes {meminfo.get("MemFree", 0)}')
+            lines.append(f'node_memory_MemTotal_bytes {meminfo.get("MemTotal", 0)}')
+            lines.append(f'node_memory_SwapFree_bytes {meminfo.get("SwapFree", 0)}')
+            lines.append(f'node_memory_SwapTotal_bytes {meminfo.get("SwapTotal", 0)}')
+
+        # SNMP
+        snmp = data.get('snmp', {})
+        for proto, vals in snmp.items():
+            if isinstance(vals, dict):
+                for k, v in vals.items():
+                    lines.append(f'node_snmp_{proto}_{k} {v}')
+
+        # Network
+        network = data.get('network', {})
+        for iface, vals in network.items():
+            if isinstance(vals, dict):
+                lines.append(f'node_network_receive_bytes_total{{interface="{iface}"}} {vals.get("rx_bytes", 0)}')
+                lines.append(f'node_network_transmit_bytes_total{{interface="{iface}"}} {vals.get("tx_bytes", 0)}')
+                lines.append(f'node_network_receive_packets_total{{interface="{iface}"}} {vals.get("rx_packets", 0)}')
+                lines.append(f'node_network_transmit_packets_total{{interface="{iface}"}} {vals.get("tx_packets", 0)}')
+
+        # Sockstat
+        sockstat = data.get('sockstat', {})
+        for proto, vals in sockstat.items():
+            if isinstance(vals, dict):
+                for k, v in vals.items():
+                    lines.append(f'node_sockstat_{proto}_{k} {v}')
+
+        # Netstat
+        netstat = data.get('netstat', {})
+        for proto, vals in netstat.items():
+            if isinstance(vals, dict):
+                for k, v in vals.items():
+                    lines.append(f'node_netstat_{proto}_{k} {v}')
+
+        # Diskstats
+        diskstats = data.get('diskstats', [])
+        for disk in diskstats:
+            dev = disk.get('device', '')
+            lines.append(f'node_disk_reads_completed_total{{device="{dev}"}} {disk.get("reads_completed", 0)}')
+            lines.append(f'node_disk_writes_completed_total{{device="{dev}"}} {disk.get("writes_completed", 0)}')
+            lines.append(f'node_disk_read_bytes_total{{device="{dev}"}} {disk.get("sectors_read", 0) * 512}')
+            lines.append(f'node_disk_written_bytes_total{{device="{dev}"}} {disk.get("sectors_written", 0) * 512}')
+            lines.append(f'node_disk_io_time_seconds_total{{device="{dev}"}} {disk.get("io_time_ms", 0) / 1000}')
+
+        # Mounts (filesystem)
+        mounts = data.get('mounts', [])
+        for mnt in mounts:
+            labels = f'mountpoint="{mnt.get("mountpoint", "")}",device="{mnt.get("device", "")}",fstype="{mnt.get("fstype", "")}"'
+            if mnt.get('total_bytes'):
+                lines.append(f'node_filesystem_size_bytes{{{labels}}} {mnt["total_bytes"]}')
+                lines.append(f'node_filesystem_avail_bytes{{{labels}}} {mnt.get("avail_bytes", 0)}')
+                lines.append(f'node_filesystem_free_bytes{{{labels}}} {mnt.get("avail_bytes", 0) + mnt.get("used_bytes", 0)}')
+
+        # Thermal
+        thermal = data.get('thermal', [])
+        for zone in thermal:
+            lines.append(f'node_thermal_zone_temp{{zone="{zone.get("zone", "")}", type="{zone.get("type", "")}"}} {zone.get("temp", 0)}')
+
+        # Timestamp
+        lines.append(f'node_time_seconds {int(time.time())}')
+
+        return '\n'.join(lines) + '\n'
+
 
 if __name__ == '__main__':
     collector = MetricsCollector()
-    print(collector.to_json())
+    s = collector.to_prometheus()
+    # print(s)
