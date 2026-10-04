@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Linux Metrics HTTP Exporter
-提供 Prometheus 指标抓取端点
+聚合多个采集器（host、gpu 等）并提供 Prometheus 指标抓取端点
 """
 
 import http.server
@@ -9,28 +9,33 @@ import socketserver
 from urllib.parse import urlparse
 
 from host_collector import HostCollector
+from gpu_collector import GpuCollector
 
 
 class MetricsHandler(http.server.BaseHTTPRequestHandler):
     """Prometheus 指标 HTTP 处理器"""
 
-    collector = None
+    collectors = []
     per_cpu = False
 
     @classmethod
-    def set_collector(cls, collector, per_cpu=False):
-        cls.collector = collector
+    def set_collectors(cls, collectors, per_cpu=False):
+        cls.collectors = list(collectors)
         cls.per_cpu = per_cpu
 
     def do_GET(self):
         """处理 GET 请求"""
         parsed_path = urlparse(self.path)
         if parsed_path.path == '/metrics':
-            # 返回 Prometheus 格式指标
+            # 拼接所有采集器输出（每个采集器忽略自己不支持的 kwargs）
+            parts = [
+                c.to_prometheus(per_cpu=self.per_cpu).rstrip()
+                for c in self.collectors
+            ]
+            metrics = '\n'.join(p for p in parts if p) + '\n'
             self.send_response(200)
             self.send_header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
             self.end_headers()
-            metrics = self.collector.to_prometheus(per_cpu=self.per_cpu)
             self.wfile.write(metrics.encode('utf-8'))
         elif parsed_path.path == '/health':
             # 健康检查
@@ -65,12 +70,12 @@ class MetricsExporter:
     def __init__(self, port=9100, per_cpu=True):
         self.port = port
         self.per_cpu = per_cpu
-        self.collector = HostCollector()
+        self.collectors = [HostCollector(), GpuCollector()]
         self.server = None
 
     def start(self):
         """启动 HTTP 服务器"""
-        MetricsHandler.set_collector(self.collector, per_cpu=self.per_cpu)
+        MetricsHandler.set_collectors(self.collectors, per_cpu=self.per_cpu)
         self.server = socketserver.TCPServer(("", self.port), MetricsHandler)
         print(f'Metrics exporter started on http://:{self.port}/metrics')
         print(f'Prometheus 抓取地址: http://localhost:{self.port}/metrics')

@@ -238,7 +238,7 @@ class GpuCollector:
         import json
         return json.dumps(self.collect(), indent=4, ensure_ascii=False)
 
-    def to_prometheus(self) -> str:
+    def to_prometheus(self, **_kwargs) -> str:
         data = self.collect()
         lines = []
         for gpu in data.get('gpus', []):

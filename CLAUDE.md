@@ -25,7 +25,8 @@ HTTP 端点：
 ## 代码结构
 
 - `collector/host_collector.py` — `HostCollector` 类。所有的 `_read_*` 方法各自读取一个 procfs/sysfs 数据源；`_collect_all()` 一次性调用它们并将结果存入 `self._data`。提供两种输出方法：`to_json()` 与 `to_prometheus(per_cpu=True)`。
-- `collector/metrics_exporter.py` — `MetricsHandler`（`http.server.BaseHTTPRequestHandler` 的子类）与 `MetricsExporter`（封装 `socketserver.TCPServer`）。每次抓取时处理器读取最新的 `HostCollector` 快照。
+- `collector/gpu_collector.py` — `GpuCollector` 类，通过 `pynvml` 调用 NVML。采集 `1.txt` 中全部 18 个 `DCGM_FI_DEV_*` 指标。提供 `to_json()` 与 `to_prometheus(**_kwargs)`（忽略多余 kwargs，便于统一调用）。依赖 `pynvml`（硬依赖，无降级）。
+- `collector/metrics_exporter.py` — `MetricsHandler`（`http.server.BaseHTTPRequestHandler` 的子类）与 `MetricsExporter`（封装 `socketserver.TCPServer`）。处理器持有 `collectors` 列表，每次抓取时对每个采集器调用 `to_prometheus(per_cpu=...)` 并拼接输出；`MetricsExporter` 默认同时挂载 `HostCollector` 与 `GpuCollector`。
 
 ## 采集的数据源
 

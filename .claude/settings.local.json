@@ -11,7 +11,16 @@
       "Bash(../.venv/Scripts/python.exe -m py_compile D:/Project/CpnQosPro/collector/plugins/k8s_plugin.py)",
       "Bash(../.venv/Scripts/python.exe:*)",
       "Bash(ls:*)",
-      "Bash(dir \"D:\\\\Project\\\\CpnQosPro\\\\collector\")"
+      "Bash(dir \"D:\\\\Project\\\\CpnQosPro\\\\collector\")",
+      "Bash(python:*)",
+      "Bash(git -C \"D:/Project/CpnQosPro\" log --oneline -20)",
+      "Bash(git -C \"D:/Project/CpnQosPro\" log --stat -5)",
+      "Bash(py -m py_compile collector/host_collector.py)",
+      "Bash(py -m py_compile collector/metrics_exporter.py)",
+      "Bash(py -m py_compile collector/gpu_collector.py)",
+      "Bash(py -m py_compile collector/metrics_exporter.py collector/gpu_collector.py collector/host_collector.py)",
+      "Bash(py -c \"from metrics_exporter import MetricsExporter; e = MetricsExporter\\(\\); print\\('collectors:', [type\\(c\\).__name__ for c in e.collectors]\\)\")",
+      "Bash(py -c ':*)"
     ]
   }
 }
