@@ -8,15 +8,14 @@ import os
 import time
 import json
 import glob
-
-from coverage.collector import Collector
+import socket
 
 
 class MetricsCollector:
     def __init__(self):
         self._data = {}  # 所有采集的原始数据
 
-    def collect(self, per_cpu=False) -> dict:
+    def collect(self, per_cpu=True) -> dict:
         self._collect_all(per_cpu=per_cpu)
         return self._data
 
@@ -29,6 +28,7 @@ class MetricsCollector:
         self._data = {
             'os_info': self._read_os_info(),
             'dmi': self._read_dmi(),
+            'uname': self._read_uname(),
             'cpu_stat': self._read_cpu_stat(per_cpu=per_cpu),
             'loadavg': self._read_loadavg(),
             'meminfo': self._read_meminfo(),
@@ -75,6 +75,21 @@ class MetricsCollector:
             if val:
                 dmi[key] = val
         return dmi
+
+    def _read_uname(self) -> dict:
+        """读取 uname 信息"""
+        try:
+            import platform
+            uname = platform.uname()
+            return {
+                'sysname': uname.system,
+                'nodename': uname.node,
+                'release': uname.release,
+                'version': uname.version,
+                'machine': uname.machine,
+            }
+        except:
+            return {}
 
     def _read_cpu_stat(self, per_cpu=False) -> dict:
         """读取 /proc/stat
@@ -345,7 +360,7 @@ class MetricsCollector:
         """输出为 JSON 格式"""
         return json.dumps(self.collect(), indent=4, ensure_ascii=False)
 
-    def to_prometheus(self, per_cpu=False) -> str:
+    def to_prometheus(self, per_cpu=True) -> str:
         """输出为 Prometheus 文本格式
 
         Args:
@@ -355,12 +370,13 @@ class MetricsCollector:
         lines = []
 
         # uname info
-
-
+        uname = data.get('uname', {})
+        if uname:
+            labels = ','.join(f'{k}="{v}"' for k, v in uname.items())
+            lines.append(f'node_uname_info{{{labels}}} 1')
 
         # OS info
         os_info = data.get('os_info', {})
-        print(os_info)
         if os_info:
             labels = ','.join(f'{k}="{v}"' for k, v in os_info.items())
             lines.append(f'node_os_info{{{labels}}} 1')
@@ -385,14 +401,14 @@ class MetricsCollector:
                     lines.append(f'node_cpu_seconds_total{{mode="softirq"}} {vals.get("softirq", 0)}')
                     lines.append(f'node_cpu_seconds_total{{mode="steal"}} {vals.get("steal", 0)}')
                 elif per_cpu and cpu.startswith('cpu'):
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="user"}} {vals.get("user", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="nice"}} {vals.get("nice", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="system"}} {vals.get("system", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="idle"}} {vals.get("idle", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="iowait"}} {vals.get("iowait", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="irq"}} {vals.get("irq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="softirq"}} {vals.get("softirq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu}",mode="steal"}} {vals.get("steal", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="user"}} {vals.get("user", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="nice"}} {vals.get("nice", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="system"}} {vals.get("system", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="idle"}} {vals.get("idle", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="iowait"}} {vals.get("iowait", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="irq"}} {vals.get("irq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="softirq"}} {vals.get("softirq", 0)}')
+                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="steal"}} {vals.get("steal", 0)}')
             elif isinstance(vals, (int, float)):
                 if cpu == 'ctxt':
                     lines.append(f'node_context_switches_total {vals}')
@@ -418,6 +434,7 @@ class MetricsCollector:
         meminfo = data.get('meminfo', {})
         if meminfo:
             lines.append(f'node_memory_MemFree_bytes {meminfo.get("MemFree", 0)}')
+            lines.append(f'node_memory_MemAvailable_bytes {meminfo.get("MemAvailable", 0)}')
             lines.append(f'node_memory_MemTotal_bytes {meminfo.get("MemTotal", 0)}')
             lines.append(f'node_memory_SwapFree_bytes {meminfo.get("SwapFree", 0)}')
             lines.append(f'node_memory_SwapTotal_bytes {meminfo.get("SwapTotal", 0)}')
@@ -483,6 +500,8 @@ class MetricsCollector:
 
 
 if __name__ == '__main__':
-    collector = MetricsCollector()
-    s = collector.to_prometheus()
-    # print(s)
+    pass
+    # collector = MetricsCollector()
+    # s = collector.to_json()
+    # print(collector.to_prometheus())
+    # # print(s)

@@ -62,7 +62,7 @@ class MetricsHandler(http.server.BaseHTTPRequestHandler):
 class MetricsExporter:
     """指标导出器 HTTP 服务器"""
 
-    def __init__(self, port=9100, per_cpu=False):
+    def __init__(self, port=9100, per_cpu=True):
         self.port = port
         self.per_cpu = per_cpu
         self.collector = MetricsCollector()
@@ -88,10 +88,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Linux Metrics Exporter')
     parser.add_argument('--port', type=int, default=9100, help='HTTP 端口 (默认: 9100)')
-    parser.add_argument('--per-cpu', action='store_true', help='包含每个 CPU 核心的详细数据')
     args = parser.parse_args()
 
-    exporter = MetricsExporter(port=args.port, per_cpu=args.per_cpu)
+    exporter = MetricsExporter(port=args.port)
     try:
         exporter.start()
     except KeyboardInterrupt:
