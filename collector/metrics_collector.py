@@ -128,14 +128,14 @@ class MetricsCollector:
                 cpu = fields[0]
                 if per_cpu or cpu == 'cpu':
                     stats[cpu] = {
-                        'user': int(fields[1]),
-                        'nice': int(fields[2]),
-                        'system': int(fields[3]),
-                        'idle': int(fields[4]),
-                        'iowait': int(fields[5]),
-                        'irq': int(fields[6]),
-                        'softirq': int(fields[7]),
-                        'steal': int(fields[8]) if len(fields) > 8 else 0,
+                        'user': int(fields[1]) / 100,
+                        'nice': int(fields[2]) / 100,
+                        'system': int(fields[3]) / 100,
+                        'idle': int(fields[4]) / 100,
+                        'iowait': int(fields[5]) / 100,
+                        'irq': int(fields[6]) / 100,
+                        'softirq': int(fields[7]) / 100,
+                        'steal': int(fields[8]) / 100 if len(fields) > 8 else 0,
                     }
 
         # 合并总计数据
@@ -461,6 +461,7 @@ class MetricsCollector:
             if isinstance(vals, dict):
                 for k, v in vals.items():
                     lines.append(f'node_sockstat_{proto}_{k} {v}')
+        lines.append(f'node_netstat_Tcp_CurrEstab {sockstat.get("TCP", {}).get("inuse", 0)}')
 
         # Netstat
         netstat = data.get('netstat', {})
@@ -501,7 +502,10 @@ class MetricsCollector:
 
 if __name__ == '__main__':
     pass
-    # collector = MetricsCollector()
+    collector = MetricsCollector()
+    # print(collector._read_netstat())
+    # print(json.dumps(collector._read_sockstat(), indent=4, ensure_ascii=False))
+
     # s = collector.to_json()
     # print(collector.to_prometheus())
     # # print(s)
