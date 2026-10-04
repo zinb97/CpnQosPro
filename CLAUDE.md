@@ -1,0 +1,69 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概述
+
+Linux 系统指标采集器与 Prometheus 导出器。一次遍历读取 `/proc`、`/sys`、`/etc/os-release`，通过 HTTP 暴露为 Prometheus 指标。纯 Python 标准库实现——无任何第三方依赖。
+
+## 运行方式
+
+入口为 `collector/metrics_exporter.py`（**不是** `main.py`，那是 PyCharm 自动生成的样板代码）。由于使用了裸导入（`from host_collector import ...`），必须从 `collector/` 目录下启动：
+
+```bash
+cd collector
+python metrics_exporter.py --port 9100
+```
+
+HTTP 端点：
+- `/metrics` — Prometheus 文本格式
+- `/health` — 返回 `OK`
+- `/` — 带有链接的索引页
+
+仓库根目录存在 `.venv`；在 Windows 下通过 `.venv/Scripts/python.exe` 调用（依据 `.claude/settings.local.json`）。
+
+## 代码结构
+
+- `collector/host_collector.py` — `HostCollector` 类。所有的 `_read_*` 方法各自读取一个 procfs/sysfs 数据源；`_collect_all()` 一次性调用它们并将结果存入 `self._data`。提供两种输出方法：`to_json()` 与 `to_prometheus(per_cpu=True)`。
+- `collector/metrics_exporter.py` — `MetricsHandler`（`http.server.BaseHTTPRequestHandler` 的子类）与 `MetricsExporter`（封装 `socketserver.TCPServer`）。每次抓取时处理器读取最新的 `HostCollector` 快照。
+
+## 采集的数据源
+
+依据 `host_collector.py` 中的 `_collect_all()`：
+
+- `/etc/os-release` → `_read_os_info`（解析 `KEY="VALUE"` 形式的键值对）
+- `/sys/class/dmi/id/*` → `_read_dmi`（bios_date、bios_vendor、bios_version、product_name、system_vendor）
+- `platform.uname()` → `_read_uname`
+- `/proc/stat` → `_read_cpu_stat`（始终读取 `cpu` 总计；仅当 `per_cpu=True` 时读取每核数据）
+- `/proc/loadavg` → `_read_loadavg`（load1/5/15 + 运行中/总进程数）
+- `/proc/meminfo` → `_read_meminfo`（值 × 1024 转换为字节）
+- `/proc/net/snmp` → `_read_snmp`（成对的表头/值行）
+- `/proc/net/dev` → `_read_network`（跳过 `lo`、`br*`、`docker*`、`veth*`、`b.*`）
+- `/proc/net/sockstat` → `_read_sockstat`
+- `/proc/net/netstat` → `_read_netstat`（成对的表头/值行）
+- `/proc/diskstats` → `_read_diskstats`（跳过 `loop*`、`ram*`；兼容 14 列与 20 列两种格式）
+- `/proc/mounts` → `_read_mounts`（使用 `os.statvfs`；按设备去重）
+- `/sys/class/thermal/thermal_zone*` → `_read_thermal`（原始温度 `/1000` 转换为 °C）
+
+## Prometheus 输出约定
+
+- `node_cpu_seconds_total{mode=...}` — 在 `_read_cpu_stat` 中已除以 100，因此直接就是秒。
+- 磁盘的 `sectors_read`/`sectors_written` 在 `to_prometheus()` 中乘以 512 转换为字节。
+- 磁盘的 `io_time_ms` 除以 1000 转换为秒。
+- 计数器不带 `# HELP` / `# TYPE` 头——由 Prometheus 自动推断类型。
+- `node_uname_info`、`node_os_info`、`node_dmi_info` 的标签集即为原始键值映射（未做归一化）。**未对标签值做引号转义**；若值中包含 `"` 会破坏解析。
+
+## 参考资料
+
+- `1.txt` — DCGM GPU exporter 输出样例（`DCGM_FI_DEV_*` 指标）。可能作为命名/标签约定的参考保留；并非本代码生成。
+
+## 验证
+
+对任一模块做语法检查：
+
+```bash
+python -m py_compile collector/host_collector.py
+python -m py_compile collector/metrics_exporter.py
+```
+
+仓库中无测试、无 linter 配置、无 `requirements.txt`。

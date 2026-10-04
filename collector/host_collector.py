@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Linux Metrics Collector
-封装为采集器类，所有文件只打开读取一次
+Linux Host Collector
+封装为主机采集器类，所有文件只打开读取一次
 """
 
 import os
@@ -11,7 +11,7 @@ import glob
 import socket
 
 
-class MetricsCollector:
+class HostCollector:
     def __init__(self):
         self._data = {}  # 所有采集的原始数据
 
@@ -502,7 +502,7 @@ class MetricsCollector:
 
 if __name__ == '__main__':
     pass
-    collector = MetricsCollector()
+    collector = HostCollector()
     # print(collector._read_netstat())
     # print(json.dumps(collector._read_sockstat(), indent=4, ensure_ascii=False))
 

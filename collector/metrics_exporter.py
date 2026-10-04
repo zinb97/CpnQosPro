@@ -8,7 +8,7 @@ import http.server
 import socketserver
 from urllib.parse import urlparse
 
-from metrics_collector import MetricsCollector
+from host_collector import HostCollector
 
 
 class MetricsHandler(http.server.BaseHTTPRequestHandler):
@@ -65,7 +65,7 @@ class MetricsExporter:
     def __init__(self, port=9100, per_cpu=True):
         self.port = port
         self.per_cpu = per_cpu
-        self.collector = MetricsCollector()
+        self.collector = HostCollector()
         self.server = None
 
     def start(self):
