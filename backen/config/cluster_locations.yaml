@@ -1,0 +1,15 @@
+# 集群元数据（经纬度等 Prometheus 无法建模的字段）
+# 与 Prometheus 查询结果按 `cluster` 标签合并
+clusters:
+  - id: bj
+    name: 北京
+    region: 华北
+    location: [116.4, 39.9]
+  - id: xa
+    name: 西安
+    region: 西北
+    location: [108.9, 34.2]
+  - id: cs
+    name: 长沙
+    region: 华中
+    location: [112.9, 28.2]
