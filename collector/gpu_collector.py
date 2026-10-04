@@ -29,6 +29,14 @@ def _safe(fn, default=0):
         return default
 
 
+def _first_of_pair(fn):
+    """调用返回二元组的 pynvml 函数，取第一项；失败返回 0。"""
+    try:
+        return fn()[0]
+    except Exception:
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # 各指标的取值器（返回数值；标签由 _read_gpu 在外层统一附加）
 # ---------------------------------------------------------------------------
@@ -67,19 +75,11 @@ def _value_mem_info(attr):
 
 
 def _value_dec_util(h, _info):
-    try:
-        util, _ = pynvml.nvmlDeviceGetDecoderUtilization(h)
-        return util
-    except Exception:
-        return 0
+    return _first_of_pair(lambda: pynvml.nvmlDeviceGetDecoderUtilization(h))
 
 
 def _value_enc_util(h, _info):
-    try:
-        util, _ = pynvml.nvmlDeviceGetEncoderUtilization(h)
-        return util
-    except Exception:
-        return 0
+    return _first_of_pair(lambda: pynvml.nvmlDeviceGetEncoderUtilization(h))
 
 
 def _value_mem_copy_util(h, _info):
@@ -87,11 +87,8 @@ def _value_mem_copy_util(h, _info):
 
 
 def _value_memory_temp(h, _info):
-    try:
-        return pynvml.nvmlDeviceGetTemperature(
-            h, pynvml.NVML_TEMPERATURE_MEMORY)
-    except Exception:
-        return 0
+    return _safe(lambda: pynvml.nvmlDeviceGetTemperature(
+        h, pynvml.NVML_TEMPERATURE_MEMORY))
 
 
 def _value_remapped(attr):
@@ -107,24 +104,15 @@ def _value_remapped(attr):
 
 
 def _value_pcie_replay(h, _info):
-    try:
-        return pynvml.nvmlDeviceGetPcieReplayCounter(h)
-    except Exception:
-        return 0
+    return _safe(lambda: pynvml.nvmlDeviceGetPcieReplayCounter(h))
 
 
 def _value_total_energy(h, _info):
-    try:
-        return pynvml.nvmlDeviceGetTotalEnergyConsumption(h)
-    except Exception:
-        return 0
+    return _safe(lambda: pynvml.nvmlDeviceGetTotalEnergyConsumption(h))
 
 
 def _value_vgpu_license(h, _info):
-    try:
-        return pynvml.nvmlDeviceGetVgpuLicenseStatus(h)
-    except Exception:
-        return 0
+    return _safe(lambda: pynvml.nvmlDeviceGetVgpuLicenseStatus(h))
 
 
 # (指标名, 取值器)
@@ -177,10 +165,7 @@ def _read_gpu(index):
         'hostname': socket.gethostname(),
         'DCGM_FI_DRIVER_VERSION': _driver_version(),
     }
-
-    metrics = {}
-    for name, extractor in METRICS:
-        metrics[name] = extractor(h, info)
+    metrics = {name: extractor(h, info) for name, extractor in METRICS}
     return {**info, 'metrics': metrics}
 
 

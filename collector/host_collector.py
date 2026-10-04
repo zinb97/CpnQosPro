@@ -11,6 +11,52 @@ import glob
 import socket
 
 
+# ---------------------------------------------------------------------------
+# 模块级解析工具
+# ---------------------------------------------------------------------------
+
+def _safe_int(value, default=0):
+    """安全解析整数；失败返回 default。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_paired_proto_stats(lines):
+    """解析 /proc/net/{snmp,netstat} 的成对表头/值行格式。"""
+    stats = {}
+    for i in range(0, len(lines) - 1, 2):
+        try:
+            proto_h, header_fields_str = lines[i].split(":", 1)
+            _, value_fields_str = lines[i + 1].split(":", 1)
+            proto_name = proto_h.strip()
+            headers = header_fields_str.strip().split()
+            values = value_fields_str.strip().split()
+            proto_dict = {}
+            for k, v in zip(headers, values):
+                proto_dict[k] = int(v)
+            stats[proto_name] = proto_dict
+        except Exception:
+            pass
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Prometheus 发射常量与方法依赖
+# ---------------------------------------------------------------------------
+
+_CPU_MODES = ('user', 'nice', 'system', 'idle', 'iowait', 'irq', 'softirq', 'steal')
+
+_CPU_STAT_SCALARS = {
+    'ctxt': 'node_context_switches_total',
+    'btime': 'node_boot_time_seconds',
+    'processes': 'node_forks_total',
+    'procs_running': 'node_procs_running',
+    'procs_blocked': 'node_procs_blocked',
+}
+
+
 class HostCollector:
     def __init__(self):
         self._data = {}  # 所有采集的原始数据
@@ -166,11 +212,7 @@ class HostCollector:
         for line in self._read_lines('/proc/meminfo'):
             parts = line.split()
             if len(parts) >= 2 and parts[0].endswith(':'):
-                key = parts[0].rstrip(':')
-                try:
-                    meminfo[key] = int(parts[1]) * 1024
-                except:
-                    pass
+                meminfo[parts[0][:-1]] = _safe_int(parts[1]) * 1024
         return meminfo
 
     def _read_diskstats(self) -> list:
@@ -238,24 +280,7 @@ class HostCollector:
 
     def _read_snmp(self) -> dict:
         """读取 /proc/net/snmp """
-        stats = {}
-        lines = self._read_lines('/proc/net/snmp')
-        for i in range(0, len(lines) - 1, 2):
-            header_line = lines[i]
-            value_line = lines[i + 1]
-            try:
-                proto_h, header_fields_str = header_line.split(":", maxsplit=1)
-                proto_v, value_fields_str = value_line.split(":", maxsplit=1)
-                proto_name = proto_h.strip()
-                headers = header_fields_str.strip().split()
-                values_raw = value_fields_str.strip().split()
-                proto_dict = {}
-                for k, v in zip(headers, values_raw):
-                    proto_dict[k] = int(v)
-                stats[proto_name] = proto_dict
-            except:
-                pass
-        return stats
+        return _parse_paired_proto_stats(self._read_lines('/proc/net/snmp'))
 
     def _read_sockstat(self) -> dict:
         """读取 /proc/net/sockstat """
@@ -277,24 +302,7 @@ class HostCollector:
 
     def _read_netstat(self) -> dict:
         """读取 /proc/net/netstat """
-        stats = {}
-        lines = self._read_lines('/proc/net/netstat')
-        for i in range(0, len(lines) - 1, 2):
-            header_line = lines[i]
-            value_line = lines[i + 1]
-            try:
-                proto_h, header_fields_str = header_line.split(":", maxsplit=1)
-                proto_v, value_fields_str = value_line.split(":", maxsplit=1)
-                proto_name = proto_h.strip()
-                headers = header_fields_str.strip().split()
-                values_raw = value_fields_str.strip().split()
-                proto_dict = {}
-                for k, v in zip(headers, values_raw):
-                    proto_dict[k] = int(v)
-                stats[proto_name] = proto_dict
-            except:
-                pass
-        return stats
+        return _parse_paired_proto_stats(self._read_lines('/proc/net/netstat'))
 
     def _read_thermal(self) -> list:
         """读取 thermal zone 信息"""
@@ -368,86 +376,82 @@ class HostCollector:
         """
         data = self.collect(per_cpu=per_cpu)
         lines = []
+        self._emit_info(lines, 'uname', data.get('uname', {}))
+        self._emit_info(lines, 'os_info', data.get('os_info', {}))
+        self._emit_info(lines, 'dmi', data.get('dmi', {}))
+        self._emit_cpu(lines, data.get('cpu_stat', {}), per_cpu)
+        self._emit_loadavg(lines, data.get('loadavg', {}))
+        self._emit_memory(lines, data.get('meminfo', {}))
+        self._emit_proto_flat(lines, 'node_snmp', data.get('snmp', {}))
+        self._emit_network(lines, data.get('network', {}))
+        self._emit_sockstat(lines, data.get('sockstat', {}))
+        self._emit_proto_flat(lines, 'node_netstat', data.get('netstat', {}))
+        self._emit_diskstats(lines, data.get('diskstats', []))
+        self._emit_mounts(lines, data.get('mounts', []))
+        self._emit_thermal(lines, data.get('thermal', []))
+        lines.append(f'node_time_seconds {int(time.time())}')
+        return '\n'.join(lines) + '\n'
 
-        # uname info
-        uname = data.get('uname', {})
-        if uname:
-            labels = ','.join(f'{k}="{v}"' for k, v in uname.items())
-            lines.append(f'node_uname_info{{{labels}}} 1')
+    # ------------------------------------------------------------------
+    # Prometheus 发射器（每个方法负责一类指标）
+    # ------------------------------------------------------------------
 
-        # OS info
-        os_info = data.get('os_info', {})
-        if os_info:
-            labels = ','.join(f'{k}="{v}"' for k, v in os_info.items())
-            lines.append(f'node_os_info{{{labels}}} 1')
+    @staticmethod
+    def _emit_info(lines, name, info):
+        if not info:
+            return
+        labels = ','.join(f'{k}="{v}"' for k, v in info.items())
+        lines.append(f'node_{name}_info{{{labels}}} 1')
 
-        # DMI info
-        dmi = data.get('dmi', {})
-        if dmi:
-            labels = ','.join(f'{k}="{v}"' for k, v in dmi.items())
-            lines.append(f'node_dmi_info{{{labels}}} 1')
-
-        # CPU stat
-        cpu_stat = data.get('cpu_stat', {})
+    @staticmethod
+    def _emit_cpu(lines, cpu_stat, per_cpu):
         for cpu, vals in cpu_stat.items():
             if isinstance(vals, dict) and 'user' in vals:
                 if cpu == 'cpu':
-                    lines.append(f'node_cpu_seconds_total{{mode="user"}} {vals.get("user", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="nice"}} {vals.get("nice", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="system"}} {vals.get("system", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="idle"}} {vals.get("idle", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="iowait"}} {vals.get("iowait", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="irq"}} {vals.get("irq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="softirq"}} {vals.get("softirq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{mode="steal"}} {vals.get("steal", 0)}')
+                    cpu_label = ''
                 elif per_cpu and cpu.startswith('cpu'):
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="user"}} {vals.get("user", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="nice"}} {vals.get("nice", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="system"}} {vals.get("system", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="idle"}} {vals.get("idle", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="iowait"}} {vals.get("iowait", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="irq"}} {vals.get("irq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="softirq"}} {vals.get("softirq", 0)}')
-                    lines.append(f'node_cpu_seconds_total{{cpu="{cpu[3:]}",mode="steal"}} {vals.get("steal", 0)}')
+                    cpu_label = f'cpu="{cpu[3:]}",'
+                else:
+                    continue
+                for mode in _CPU_MODES:
+                    lines.append(
+                        f'node_cpu_seconds_total{{{cpu_label}mode="{mode}"}} {vals.get(mode, 0)}'
+                    )
             elif isinstance(vals, (int, float)):
-                if cpu == 'ctxt':
-                    lines.append(f'node_context_switches_total {vals}')
-                elif cpu == 'btime':
-                    lines.append(f'node_boot_time_seconds {vals}')
-                elif cpu == 'processes':
-                    lines.append(f'node_forks_total {vals}')
-                elif cpu == 'procs_running':
-                    lines.append(f'node_procs_running {vals}')
-                elif cpu == 'procs_blocked':
-                    lines.append(f'node_procs_blocked {vals}')
+                metric_name = _CPU_STAT_SCALARS.get(cpu)
+                if metric_name:
+                    lines.append(f'{metric_name} {vals}')
 
-        # Load average
-        loadavg = data.get('loadavg', {})
-        if loadavg:
-            lines.append(f'node_load1 {loadavg.get("load1", 0)}')
-            lines.append(f'node_load5 {loadavg.get("load5", 0)}')
-            lines.append(f'node_load15 {loadavg.get("load15", 0)}')
-            lines.append(f'node_loadavg_running_process {loadavg.get("running_process", 0)}')
-            lines.append(f'node_loadavg_total_process {loadavg.get("total_process", 0)}')
+    @staticmethod
+    def _emit_loadavg(lines, loadavg):
+        if not loadavg:
+            return
+        lines.append(f'node_load1 {loadavg.get("load1", 0)}')
+        lines.append(f'node_load5 {loadavg.get("load5", 0)}')
+        lines.append(f'node_load15 {loadavg.get("load15", 0)}')
+        lines.append(f'node_loadavg_running_process {loadavg.get("running_process", 0)}')
+        lines.append(f'node_loadavg_total_process {loadavg.get("total_process", 0)}')
 
-        # Memory
-        meminfo = data.get('meminfo', {})
-        if meminfo:
-            lines.append(f'node_memory_MemFree_bytes {meminfo.get("MemFree", 0)}')
-            lines.append(f'node_memory_MemAvailable_bytes {meminfo.get("MemAvailable", 0)}')
-            lines.append(f'node_memory_MemTotal_bytes {meminfo.get("MemTotal", 0)}')
-            lines.append(f'node_memory_SwapFree_bytes {meminfo.get("SwapFree", 0)}')
-            lines.append(f'node_memory_SwapTotal_bytes {meminfo.get("SwapTotal", 0)}')
+    @staticmethod
+    def _emit_memory(lines, meminfo):
+        if not meminfo:
+            return
+        lines.append(f'node_memory_MemFree_bytes {meminfo.get("MemFree", 0)}')
+        lines.append(f'node_memory_MemAvailable_bytes {meminfo.get("MemAvailable", 0)}')
+        lines.append(f'node_memory_MemTotal_bytes {meminfo.get("MemTotal", 0)}')
+        lines.append(f'node_memory_SwapFree_bytes {meminfo.get("SwapFree", 0)}')
+        lines.append(f'node_memory_SwapTotal_bytes {meminfo.get("SwapTotal", 0)}')
 
-        # SNMP
-        snmp = data.get('snmp', {})
-        for proto, vals in snmp.items():
+    @staticmethod
+    def _emit_proto_flat(lines, prefix, proto_data):
+        """通用：把嵌套 dict {'proto': {k: v, ...}} 平铺成 prefix_proto_k v。"""
+        for proto, vals in proto_data.items():
             if isinstance(vals, dict):
                 for k, v in vals.items():
-                    lines.append(f'node_snmp_{proto}_{k} {v}')
+                    lines.append(f'{prefix}_{proto}_{k} {v}')
 
-        # Network
-        network = data.get('network', {})
+    @staticmethod
+    def _emit_network(lines, network):
         for iface, vals in network.items():
             if isinstance(vals, dict):
                 lines.append(f'node_network_receive_bytes_total{{interface="{iface}"}} {vals.get("rx_bytes", 0)}')
@@ -455,23 +459,16 @@ class HostCollector:
                 lines.append(f'node_network_receive_packets_total{{interface="{iface}"}} {vals.get("rx_packets", 0)}')
                 lines.append(f'node_network_transmit_packets_total{{interface="{iface}"}} {vals.get("tx_packets", 0)}')
 
-        # Sockstat
-        sockstat = data.get('sockstat', {})
+    @staticmethod
+    def _emit_sockstat(lines, sockstat):
         for proto, vals in sockstat.items():
             if isinstance(vals, dict):
                 for k, v in vals.items():
                     lines.append(f'node_sockstat_{proto}_{k} {v}')
         lines.append(f'node_netstat_Tcp_CurrEstab {sockstat.get("TCP", {}).get("inuse", 0)}')
 
-        # Netstat
-        netstat = data.get('netstat', {})
-        for proto, vals in netstat.items():
-            if isinstance(vals, dict):
-                for k, v in vals.items():
-                    lines.append(f'node_netstat_{proto}_{k} {v}')
-
-        # Diskstats
-        diskstats = data.get('diskstats', [])
+    @staticmethod
+    def _emit_diskstats(lines, diskstats):
         for disk in diskstats:
             dev = disk.get('device', '')
             lines.append(f'node_disk_reads_completed_total{{device="{dev}"}} {disk.get("reads_completed", 0)}')
@@ -480,8 +477,8 @@ class HostCollector:
             lines.append(f'node_disk_written_bytes_total{{device="{dev}"}} {disk.get("sectors_written", 0) * 512}')
             lines.append(f'node_disk_io_time_seconds_total{{device="{dev}"}} {disk.get("io_time_ms", 0) / 1000}')
 
-        # Mounts (filesystem)
-        mounts = data.get('mounts', [])
+    @staticmethod
+    def _emit_mounts(lines, mounts):
         for mnt in mounts:
             labels = f'mountpoint="{mnt.get("mountpoint", "")}",device="{mnt.get("device", "")}",fstype="{mnt.get("fstype", "")}"'
             if mnt.get('total_bytes'):
@@ -489,15 +486,13 @@ class HostCollector:
                 lines.append(f'node_filesystem_avail_bytes{{{labels}}} {mnt.get("avail_bytes", 0)}')
                 lines.append(f'node_filesystem_free_bytes{{{labels}}} {mnt.get("avail_bytes", 0) + mnt.get("used_bytes", 0)}')
 
-        # Thermal
-        thermal = data.get('thermal', [])
+    @staticmethod
+    def _emit_thermal(lines, thermal):
         for zone in thermal:
-            lines.append(f'node_thermal_zone_temp{{zone="{zone.get("zone", "")}", type="{zone.get("type", "")}"}} {zone.get("temp", 0)}')
-
-        # Timestamp
-        lines.append(f'node_time_seconds {int(time.time())}')
-
-        return '\n'.join(lines) + '\n'
+            lines.append(
+                f'node_thermal_zone_temp{{zone="{zone.get("zone", "")}", '
+                f'type="{zone.get("type", "")}"}} {zone.get("temp", 0)}'
+            )
 
 
 if __name__ == '__main__':
@@ -507,5 +502,5 @@ if __name__ == '__main__':
     # print(json.dumps(collector._read_sockstat(), indent=4, ensure_ascii=False))
 
     # s = collector.to_json()
-    # print(collector.to_prometheus())
+    print(collector.to_prometheus())
     # # print(s)

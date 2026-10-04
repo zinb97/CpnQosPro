@@ -12,52 +12,63 @@ from host_collector import HostCollector
 from gpu_collector import GpuCollector
 
 
-class MetricsHandler(http.server.BaseHTTPRequestHandler):
-    """Prometheus 指标 HTTP 处理器"""
-
-    collectors = []
-    per_cpu = False
-
-    @classmethod
-    def set_collectors(cls, collectors, per_cpu=False):
-        cls.collectors = list(collectors)
-        cls.per_cpu = per_cpu
-
-    def do_GET(self):
-        """处理 GET 请求"""
-        parsed_path = urlparse(self.path)
-        if parsed_path.path == '/metrics':
-            # 拼接所有采集器输出（每个采集器忽略自己不支持的 kwargs）
-            parts = [
-                c.to_prometheus(per_cpu=self.per_cpu).rstrip()
-                for c in self.collectors
-            ]
-            metrics = '\n'.join(p for p in parts if p) + '\n'
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(metrics.encode('utf-8'))
-        elif parsed_path.path == '/health':
-            # 健康检查
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'OK')
-        elif parsed_path.path == '/':
-            # 首页
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.end_headers()
-            html = '''<!DOCTYPE html>
+_INDEX_HTML = '''<!DOCTYPE html>
 <html><head><title>Linux Metrics Exporter</title></head>
 <body><h1>Linux Metrics Exporter</h1>
 <p><a href="/metrics">/metrics</a> - Prometheus 格式指标</p>
 <p><a href="/health">/health</a> - 健康检查</p>
 </body></html>'''
-            self.wfile.write(html.encode('utf-8'))
+
+
+class MetricsHandler(http.server.BaseHTTPRequestHandler):
+    """Prometheus 指标 HTTP 处理器"""
+
+    collectors = ()
+    per_cpu = False
+
+    @classmethod
+    def set_collectors(cls, collectors, per_cpu=False):
+        cls.collectors = tuple(collectors)
+        cls.per_cpu = per_cpu
+
+    def do_GET(self):
+        """按路径分派到对应的响应方法。"""
+        path = urlparse(self.path).path
+        if path == '/metrics':
+            self._respond_metrics()
+        elif path == '/health':
+            self._respond_health()
+        elif path == '/':
+            self._respond_index()
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._respond_not_found()
+
+    def _respond_metrics(self):
+        # 每个采集器忽略自己不支持的 kwargs；空串过滤掉
+        parts = [
+            c.to_prometheus(per_cpu=self.per_cpu).rstrip()
+            for c in self.collectors
+        ]
+        body = '\n'.join(p for p in parts if p) + '\n'
+        self._write(200, 'text/plain; version=0.0.4; charset=utf-8', body)
+
+    def _respond_health(self):
+        self._write(200, 'text/plain', 'OK')
+
+    def _respond_index(self):
+        self._write(200, 'text/html', _INDEX_HTML)
+
+    def _respond_not_found(self):
+        self.send_response(404)
+        self.end_headers()
+
+    def _write(self, status, content_type, body):
+        if isinstance(body, str):
+            body = body.encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, format, *args):
         """自定义日志格式"""
