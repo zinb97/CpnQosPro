@@ -1,607 +1,442 @@
 #!/usr/bin/env python3
 """
 Linux Metrics Collector
-收集 metrics_extracted.csv 中列出的所有指标
+封装为采集器类，所有文件只打开读取一次
 """
 
 import os
 import time
-import glob
-from typing import Optional
-
 import json
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
+import glob
 
 
-def read_file(path: str) -> Optional[str]:
-    """安全读取文件"""
-    try:
-        with open(path, 'r') as f:
-            return f.read().strip()
-    except (IOError, OSError):
-        return None
+class MetricsCollector:
+    """Linux指标采集器"""
 
+    def __init__(self):
+        self._data = {}  # 所有采集的原始数据
 
-def get_cpu_freq() -> tuple:
-    """获取CPU频率"""
-    try:
-        with open('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq', 'r') as f:
-            max_freq = int(f.read().strip()) * 1000  # kHz to Hz
-        with open('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq', 'r') as f:
-            min_freq = int(f.read().strip()) * 1000
-        return max_freq, min_freq
-    except:
-        return None, None
+    def collect(self, per_cpu=False) -> dict:
+        """收集所有指标
 
+        Args:
+            per_cpu: 是否读取每个 CPU 核心的详细数据，默认只读总计数据
+        """
+        self._collect_all(per_cpu=per_cpu)
+        # return self._build_metrics()
+        return self._data
 
-def get_cpu_stats() -> dict:
-    """获取CPU统计信息"""
-    try:
+    def _collect_all(self, per_cpu=False):
+        """一次性采集所有原始数据
+
+        Args:
+            per_cpu: 是否读取每个 CPU 核心的详细数据，默认只读总计数据
+        """
+        self._data = {
+            'os_info': self._read_os_info(),
+            'dmi': self._read_dmi(),
+            'cpu_stat': self._read_cpu_stat(per_cpu=per_cpu),
+            'loadavg': self._read_loadavg(),
+            'meminfo': self._read_meminfo(),
+            'snmp': self._read_snmp(),
+            'network': self._read_network(),
+            'sockstat': self._read_sockstat(),
+            'netstat': self._read_netstat(),
+            'diskstats': self._read_diskstats(),
+            'mounts': self._read_mounts(),
+            'thermal': self._read_thermal(),
+        }
+
+    def _read_file(self, path: str, default=None):
+        """安全读取文件"""
+        try:
+            with open(path, 'r') as f:
+                return f.read().strip()
+        except:
+            return default
+
+    def _read_lines(self, path: str) -> list:
+        """读取文件所有行"""
+        try:
+            with open(path, 'r') as f:
+                return [line.strip() for line in f.read().splitlines() if line.strip()]
+        except:
+            return []
+
+    def _read_os_info(self) -> dict:
+        """读取 /etc/os-release """
+        info = {}
+        for line in self._read_lines('/etc/os-release'):
+            if '=' in line and 'URL' not in line:
+                key, value = line.split('=', 1)
+                value = value.strip('"')
+                info[key] = value
+        return info
+
+    def _read_dmi(self) -> dict:
+        """读取 DMI 信息"""
+        dmi = {}
+        for key in ['bios_date', 'bios_vendor', 'bios_version', 'product_name', 'system_vendor']:
+            val = self._read_file(f'/sys/class/dmi/id/{key}')
+            if val:
+                dmi[key] = val
+        return dmi
+
+    def _read_cpu_stat(self, per_cpu=False) -> dict:
+        """读取 /proc/stat
+
+        Args:
+            per_cpu: 是否读取每个 CPU 核心的详细数据，默认只读总计数据
+        """
         stats = {}
-        with open('/proc/stat', 'r') as f:
-            for line in f:
-                cpu, stat = None, {}
-                if line.startswith('cpu'):
-                    fields = line.split()
-                    cpu = fields[0]
-                    stat['user'] = int(fields[1])
-                    stat['nice'] = int(fields[2])
-                    stat['system'] = int(fields[3])
-                    stat['idle'] = int(fields[4])
-                    stat['iowait'] = int(fields[5])
-                    stat['irq'] = int(fields[6])
-                    stat['softirq'] = int(fields[7])
-                    stat['steal'] = int(fields[8]) if len(fields) > 8 else 0
-                if cpu:
-                    stats[cpu] = stat
+        for line in self._read_lines('/proc/stat'):
+            fields = line.split()
+            if not fields:
+                continue
 
+            # 总计行：cpu 或 特定统计行
+            if fields[0] == 'ctxt':
+                stats['ctxt'] = int(fields[1])
+            elif fields[0] == 'btime':
+                stats['btime'] = int(fields[1])
+            elif fields[0] == 'processes':
+                stats['processes'] = int(fields[1])
+            elif fields[0] == 'procs_running':
+                stats['procs_running'] = int(fields[1])
+            elif fields[0] == 'procs_blocked':
+                stats['procs_blocked'] = int(fields[1])
+            elif fields[0] == 'softirq':
+                stats['softirq'] = {
+                    'total': int(fields[1]),
+                    'hi': int(fields[2]),
+                    'timer': int(fields[3]),
+                    'net_trans': int(fields[4]),
+                    'net_recv': int(fields[5]),
+                    ' sched': int(fields[6]),
+                    'rcu': int(fields[7]) if len(fields) > 7 else 0,
+                }
+            elif fields[0].startswith('cpu') and len(fields) >= 8:
+                cpu = fields[0]
+                if per_cpu or cpu == 'cpu':
+                    stats[cpu] = {
+                        'user': int(fields[1]),
+                        'nice': int(fields[2]),
+                        'system': int(fields[3]),
+                        'idle': int(fields[4]),
+                        'iowait': int(fields[5]),
+                        'irq': int(fields[6]),
+                        'softirq': int(fields[7]),
+                        'steal': int(fields[8]) if len(fields) > 8 else 0,
+                    }
+
+        # 合并总计数据
         return stats
-    except:
-        return {}
 
+    def _read_loadavg(self) -> dict:
+        """读取 /proc/loadavg """
+        lines = self._read_lines('/proc/loadavg')
+        if not lines:
+            return {}
+        fields = lines[0].split()
+        run_proc = 0
+        total_proc = 0
+        if len(fields) >= 4 and '/' in fields[3]:
+            run_proc, total_proc = fields[3].split("/")
+        return {
+            'load1': float(fields[0]) if len(fields) > 0 else 0.0,
+            'load5': float(fields[1]) if len(fields) > 1 else 0.0,
+            'load15': float(fields[2]) if len(fields) > 2 else 0.0,
+            'running_process': int(run_proc) if run_proc.isdigit() else 0,
+            'total_process': int(total_proc) if total_proc.isdigit() else 0,
+            'last_pid': int(fields[4]) if len(fields) > 4 and fields[4].isdigit() else 0,
+        }
 
-def get_context_switches() -> Optional[int]:
-    """获取上下文切换次数"""
-    try:
-        with open('/proc/stat', 'r') as f:
-            for line in f:
-                if line.startswith('ctxt '):
-                    return int(line.split()[1])
-        return None
-    except:
-        return None
+    def _read_meminfo(self) -> dict:
+        """读取 /proc/meminfo """
+        meminfo = {}
+        for line in self._read_lines('/proc/meminfo'):
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].endswith(':'):
+                key = parts[0].rstrip(':')
+                try:
+                    meminfo[key] = int(parts[1]) * 1024
+                except:
+                    pass
+        return meminfo
 
+    def _read_diskstats(self) -> list:
+        """读取 /proc/diskstats """
+        disks = []
+        for line in self._read_lines('/proc/diskstats'):
+            fields = line.split()
+            if len(fields) >= 14:
+                device = fields[2]
+                if device.startswith('loop') or device.startswith('ram'):
+                    continue
+                item = {
+                    'major': int(fields[0]),
+                    'minor': int(fields[1]),
+                    'device': device,
+                    'reads_completed': int(fields[3]),
+                    'reads_merged': int(fields[4]),
+                    'sectors_read': int(fields[5]),
+                    'read_time_ms': int(fields[6]),
+                    'writes_completed': int(fields[7]),
+                    'writes_merged': int(fields[8]),
+                    'sectors_written': int(fields[9]),
+                    'write_time_ms': int(fields[10]),
+                    'in_flight_io': int(fields[11]),
+                    'io_time_ms': int(fields[12]),
+                    'queue_total_wait_ms': int(fields[13]),
+                    'discard_completed': 0,
+                    'discard_merged': 0,
+                    'discard_sectors': 0,
+                    'discard_time_ms': 0,
+                    'flush_completed': 0,
+                    'flush_time_ms': 0,
+                }
+                # 如果有20列，覆盖discard/flush字段
+                if len(fields) >= 20:
+                    item['discard_completed'] = int(fields[14])
+                    item['discard_merged'] = int(fields[15])
+                    item['discard_sectors'] = int(fields[16])
+                    item['discard_time_ms'] = int(fields[17])
+                    item['flush_completed'] = int(fields[18])
+                    item['flush_time_ms'] = int(fields[19])
+                disks.append(item)
+        return disks
 
-def get_intr() -> Optional[int]:
-    """获取中断总数"""
-    try:
-        with open('/proc/stat', 'r') as f:
-            for line in f:
-                if line.startswith('intr '):
-                    return int(line.split()[1])
-        return None
-    except:
-        return None
+    def _read_network(self) -> dict:
+        """读取 /proc/net/dev """
+        net = {}
+        for line in self._read_lines('/proc/net/dev')[2:]:
+            fields = line.split()
+            if len(fields) >= 10:
+                iface = fields[0].rstrip(':')
+                if iface in ('lo',) or iface.startswith(('br', 'docker', 'veth', 'b.')):
+                    continue
+                net[iface] = {
+                    'rx_bytes': int(fields[1]),
+                    'rx_packets': int(fields[2]),
+                    'rx_errs': int(fields[3]),
+                    'rx_drop': int(fields[4]),
+                    'tx_bytes': int(fields[9]),
+                    'tx_packets': int(fields[10]),
+                    'tx_errs': int(fields[11]),
+                    'tx_drop': int(fields[12]),
+                }
+        return net
 
-
-def get_meminfo() -> dict:
-    """获取内存信息"""
-    meminfo = {}
-    try:
-        with open('/proc/meminfo', 'r') as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) >= 2:
-                    key = parts[0].rstrip(':')
-                    try:
-                        meminfo[key] = int(parts[1]) * 1024  # KB to bytes
-                    except ValueError:
-                        pass
-    except:
-        pass
-    return meminfo
-
-
-def get_filesystem_info() -> list:
-    """获取文件系统信息"""
-    fs_info = []
-    try:
-        for line in glob.glob('/proc/self/mountinfo') or glob.glob('/proc/mounts'):
+    def _read_snmp(self) -> dict:
+        """读取 /proc/net/snmp """
+        stats = {}
+        lines = self._read_lines('/proc/net/snmp')
+        for i in range(0, len(lines) - 1, 2):
+            header_line = lines[i]
+            value_line = lines[i + 1]
             try:
-                with open('/proc/mounts', 'r') as f:
-                    for line in f:
-                        fields = line.split()
-                        if len(fields) >= 4:
-                            device = fields[0]
-                            mountpoint = fields[1]
-                            fstype = fields[2]
-                            if fstype in ('ext4', 'xfs', 'btrfs', 'overlay'):
-                                try:
-                                    stat = os.statvfs(mountpoint)
-                                    fs_info.append({
-                                        'device': device,
-                                        'mountpoint': mountpoint,
-                                        'fstype': fstype,
-                                        'size': stat.f_blocks * stat.f_frsize,
-                                        'free': stat.f_bfree * stat.f_frsize,
-                                        'avail': stat.f_bavail * stat.f_frsize,
-                                    })
-                                except:
-                                    pass
+                proto_h, header_fields_str = header_line.split(":", maxsplit=1)
+                proto_v, value_fields_str = value_line.split(":", maxsplit=1)
+                proto_name = proto_h.strip()
+                headers = header_fields_str.strip().split()
+                values_raw = value_fields_str.strip().split()
+                proto_dict = {}
+                for k, v in zip(headers, values_raw):
+                    proto_dict[k] = int(v)
+                stats[proto_name] = proto_dict
             except:
                 pass
-            break
-    except:
-        pass
-    return fs_info
+        return stats
 
-
-def get_hwmon_info() -> list:
-    """获取硬件监控信息"""
-    hwmon_info = []
-    try:
-        for hwmon_path in glob.glob('/sys/class/hwmon/hwmon*'):
-            try:
-                name = read_file(os.path.join(hwmon_path, 'name')) or 'hwmon'
-                # Power
-                for pwr_file in ['power_average', 'power_is_battery']:
-                    pwr_path = os.path.join(hwmon_path, pwr_file)
-                    if os.path.exists(pwr_path):
-                        try:
-                            val = read_file(pwr_path)
-                            if val:
-                                hwmon_info.append({
-                                    'type': 'power',
-                                    'name': name,
-                                    'file': pwr_file,
-                                    'value': float(val),
-                                })
-                        except:
-                            pass
-                # Temp
-                for temp_file in glob.glob(os.path.join(hwmon_path, 'temp*_input')):
+    def _read_sockstat(self) -> dict:
+        """读取 /proc/net/sockstat """
+        sockstat = {}
+        for line in self._read_lines('/proc/net/sockstat'):
+            parts = line.split()
+            if len(parts) >= 2:
+                proto_name = parts[0].rstrip(":")
+                data = {}
+                for i in range(1, len(parts) - 1, 2):
                     try:
-                        val = read_file(temp_file)
-                        if val:
-                            hwmon_info.append({
-                                'type': 'temp',
-                                'name': name,
-                                'file': os.path.basename(temp_file),
-                                'value': float(val) / 1000,  # millidegrees to Celsius
-                            })
+                        k = parts[i]
+                        v = int(parts[i + 1])
+                        data[k] = v
                     except:
                         pass
+                sockstat[proto_name] = data
+        return sockstat
+
+    def _read_netstat(self) -> dict:
+        """读取 /proc/net/netstat """
+        stats = {}
+        lines = self._read_lines('/proc/net/netstat')
+        for i in range(0, len(lines) - 1, 2):
+            header_line = lines[i]
+            value_line = lines[i + 1]
+            try:
+                proto_h, header_fields_str = header_line.split(":", maxsplit=1)
+                proto_v, value_fields_str = value_line.split(":", maxsplit=1)
+                proto_name = proto_h.strip()
+                headers = header_fields_str.strip().split()
+                values_raw = value_fields_str.strip().split()
+                proto_dict = {}
+                for k, v in zip(headers, values_raw):
+                    proto_dict[k] = int(v)
+                stats[proto_name] = proto_dict
             except:
                 pass
-    except:
-        pass
-    return hwmon_info
+        return stats
 
-
-def get_thermal_zones() -> list:
-    """获取散热区温度"""
-    zones = []
-    try:
+    def _read_thermal(self) -> list:
+        """读取 thermal zone 信息"""
+        zones = []
         for zone_path in glob.glob('/sys/class/thermal/thermal_zone*'):
             try:
                 temp_file = os.path.join(zone_path, 'temp')
-                if os.path.exists(temp_file):
-                    val = read_file(temp_file)
-                    if val:
-                        zones.append({
-                            'zone': os.path.basename(zone_path),
-                            'temp': float(val) / 1000,
-                        })
+                type_file = os.path.join(zone_path, 'type')
+                type_ = self._read_file(type_file) if os.path.exists(type_file) else None
+                val = int(self._read_file(temp_file)) if os.path.exists(temp_file) else None
+                if val and type_:
+                    zones.append({
+                        'type': type_,
+                        'temp': val / 1000,
+                    })
             except:
                 pass
-    except:
-        pass
-    return zones
+        return zones
 
-
-def get_disk_stats() -> list:
-    """获取磁盘统计"""
-    disk_stats = []
-    try:
-        for disk_path in glob.glob('/sys/block/*/stat'):
-            try:
-                disk_name = os.path.basename(os.path.dirname(disk_path))
-                if disk_name.startswith('loop') or disk_name in ['sr0', 'sr0']:
+    def _read_mounts(self) -> list:
+        """读取挂载点信息"""
+        mounts = []
+        seen_devices = set()
+        try:
+            for line in self._read_lines('/proc/mounts'):
+                fields = line.split()
+                device = fields[0]
+                if '/dev' not in device or 'loop' in device:
                     continue
-                with open(disk_path, 'r') as f:
-                    fields = f.read().split()
-                    if len(fields) >= 11:
-                        disk_stats.append({
-                            'device': disk_name,
-                            'reads_completed': int(fields[0]),
-                            'reads_merged': int(fields[1]),
-                            'sectors_read': int(fields[2]),
-                            'read_time': int(fields[3]),
-                            'writes_completed': int(fields[4]),
-                            'writes_merged': int(fields[5]),
-                            'sectors_written': int(fields[6]),
-                            'write_time': int(fields[7]),
-                            'io_time': int(fields[9]),
-                        })
-            except:
-                pass
-    except:
-        pass
-    return disk_stats
 
+                if device not in seen_devices:
+                    seen_devices.add(device)
+                else:
+                    continue
 
-def get_boot_time() -> Optional[int]:
-    """获取启动时间"""
-    try:
-        with open('/proc/stat', 'r') as f:
-            for line in f:
-                if line.startswith('btime '):
-                    return int(line.split()[1])
-        return None
-    except:
-        return None
+                mountpoint = fields[1]
+                try:
+                    stat = os.statvfs(mountpoint)
+                    total_bytes = stat.f_blocks * stat.f_frsize
+                    avail_bytes = stat.f_bavail * stat.f_frsize
+                    used_bytes = (stat.f_blocks - stat.f_bfree) * stat.f_frsize
+                except OSError:
+                    total_bytes = None
+                    avail_bytes = None
+                    used_bytes = None
 
-
-def get_os_info() -> dict:
-    """获取OS信息，解析 /etc/os-release"""
-    info = {}
-    try:
-        with open('/etc/os-release', 'r') as f:
-            for line in f:
-                line = line.strip()
-                if '=' in line and 'URL' not in line:
-                    key, value = line.split('=', 1)
-                    value = value.strip('"')
-                    info[key] = value
-    except:
-        pass
-    return info
-
-
-def get_network_stats() -> dict:
-    """获取网络统计"""
-    net_stats = {}
-    try:
-        with open('/proc/net/dev', 'r') as f:
-            f.readline()  # skip header
-            f.readline()  # skip header
-            for line in f:
-                fields = line.split()
-                if len(fields) >= 10:
-                    iface = fields[0].rstrip(':')
-                    # 过滤掉 loopback、bridge、docker、veth
-                    if iface in ('lo',) or iface.startswith(('br', 'docker', 'veth', 'b.')):
-                        continue
-                    net_stats[iface] = {
-                        'rx_bytes': int(fields[1]),
-                        'rx_packets': int(fields[2]),
-                        'tx_bytes': int(fields[9]),
-                        'tx_packets': int(fields[10]),
-                    }
-    except:
-        pass
-    return net_stats
-
-
-def get_netstat_tcp_udp() -> dict:
-    """获取TCP/UDP netstat统计"""
-    stats = {}
-    try:
-        with open('/proc/net/snmp', 'r') as f:
-            f.readline()  # header
-            for line in f:
-                fields = line.split()
-                if len(fields) >= 6:
-                    proto = fields[0].lower()
-                    if proto in ('tcp', 'udp'):
-                        stats[f'{proto}_in_segs'] = int(fields[5])
-                        stats[f'{proto}_out_segs'] = int(fields[6])
-        # TCP current established
-        try:
-            with open('/proc/net/netstat', 'r') as f:
-                f.readline()
-                for line in f:
-                    if line.startswith('TcpExt:'):
-                        fields = line.split()
-                        for i, f in enumerate(fields):
-                            if f == 'CurrEstab':
-                                stats['tcp_curr_estab'] = int(fields[i])
-                                break
-                        break
+                if len(fields) >= 4:
+                    mounts.append({
+                        'device': device,
+                        'mountpoint': mountpoint,
+                        'fstype': fields[2],
+                        'options': fields[3],
+                        'total_bytes': total_bytes,
+                        'avail_bytes': avail_bytes,
+                        'used_bytes': used_bytes,
+                    })
         except:
             pass
-    except:
-        pass
-    return stats
+        return mounts
 
+    def _build_metrics(self) -> dict:
+        """构建指标字典"""
+        data = self._data
+        metrics = {}
 
-def get_sockstat() -> dict:
-    """获取套接字统计"""
-    sockstat = {}
-    try:
-        with open('/proc/net/sockstat', 'r') as f:
-            for line in f:
-                if line.startswith('sockets: used'):
-                    parts = line.split()
-                    for i, p in enumerate(parts):
-                        if p == 'used':
-                            sockstat['sockets_used'] = int(parts[i + 1])
-                            break
-    except:
-        pass
-    return sockstat
+        # CPU stat
+        metrics['node_cpu_stat'] = data.get('cpu_stat', {})
 
+        # Load average
+        metrics['node_loadavg'] = data.get('loadavg', {})
 
-def get_schedstats() -> dict:
-    """获取调度器统计"""
-    schedstats = {}
-    try:
-        # Per-CPU scheduler stats
-        for cpu_path in glob.glob('/sys/devices/system/cpu/cpu*/schedstat'):
-            try:
-                with open(cpu_path, 'r') as f:
-                    fields = f.read().split()
-                    if len(fields) >= 3:
-                        cpu_id = os.path.basename(os.path.dirname(cpu_path))
-                        if 'running_seconds' not in schedstats:
-                            schedstats['running_seconds'] = 0
-                            schedstats['timeslices'] = 0
-                            schedstats['waiting_seconds'] = 0
-                        schedstats['running_seconds'] += int(fields[0])
-                        schedstats['timeslices'] += int(fields[1])
-                        schedstats['waiting_seconds'] += int(fields[2])
-            except:
-                pass
-    except:
-        pass
-    return schedstats
+        # Memory
+        meminfo = data.get('meminfo', {})
+        metrics['node_memory_MemFree_bytes'] = meminfo.get('MemFree', 0)
+        metrics['node_memory_MemTotal_bytes'] = meminfo.get('MemTotal', 0)
+        metrics['node_memory_SwapFree_bytes'] = meminfo.get('SwapFree', 0)
+        metrics['node_memory_SwapTotal_bytes'] = meminfo.get('SwapTotal', 0)
 
-
-def get_loadavg() -> dict:
-    """获取负载信息"""
-    try:
-        with open('/proc/loadavg', 'r') as f:
-            fields = f.read().split()
-            return {
-                'load1': float(fields[0]),
-                'load5': float(fields[1]),
-                'load15': float(fields[2]),
+        # Disk stats
+        disk_info = {}
+        for disk in data.get('diskstats', []):
+            dev = disk['device']
+            if dev.startswith('loop') or dev.startswith('ram'):
+                continue
+            disk_info[dev] = {
+                'reads_completed': disk['reads_completed'],
+                'writes_completed': disk['writes_completed'],
+                'io_time_ms': disk['io_time_ms'],
+                'sectors_read': disk['sectors_read'],
+                'sectors_written': disk['sectors_written'],
             }
-    except:
-        return {}
+        metrics['node_disk_stats'] = disk_info
 
+        # Network
+        metrics['node_network'] = data.get('network', {})
 
-def get_process_stats() -> dict:
-    """获取进程统计"""
-    stats = {}
-    try:
-        with open('/proc/loadavg', 'r') as f:
-            pass  # just check if readable
-        # Count processes
-        try:
-            count_running = 0
-            count_blocked = 0
-            for pid in os.listdir('/proc'):
-                if pid.isdigit():
-                    try:
-                        with open(f'/proc/{pid}/status', 'r') as sf:
-                            for line in sf:
-                                if line.startswith('State:'):
-                                    state = line.split()[1]
-                                    if state == 'R':
-                                        count_running += 1
-                                    elif state == 'D':
-                                        count_blocked += 1
-                                    break
-                    except:
-                        pass
-            stats['procs_running'] = count_running
-            stats['procs_blocked'] = count_blocked
-        except:
-            pass
-        # Forks
-        try:
-            with open('/proc/stat', 'r') as f:
-                for line in f:
-                    if line.startswith('processes '):
-                        stats['forks_total'] = int(line.split()[1])
-                        break
-        except:
-            pass
-    except:
-        pass
-    return stats
+        # OS info
+        metrics['node_os_info'] = data.get('os_info', {})
 
+        # SNMP
+        metrics['node_snmp'] = data.get('snmp', {})
 
-def get_dmi_info() -> dict:
-    """获取DMI信息"""
-    dmi = {}
-    try:
-        for key in ['bios_date', 'bios_vendor', 'bios_version', 'product_name', 'system_vendor']:
-            val = read_file(f'/sys/class/dmi/id/{key}')
-            if val:
-                dmi[key] = val
-    except:
-        pass
-    return dmi
+        # Sockstat
+        metrics['node_sockstat'] = data.get('sockstat', {})
 
+        # Netstat
+        metrics['node_netstat'] = data.get('netstat', {})
 
-def get_filefd_info() -> dict:
-    """获取文件描述符信息"""
-    fd_info = {}
-    try:
-        # Allocated
-        allocated = 0
-        for fd_path in glob.glob('/proc/*/fd'):
-            try:
-                allocated += 1
-            except:
-                pass
-        fd_info['allocated'] = allocated
-        # Maximum
-        try:
-            with open('/proc/sys/fs/file-max', 'r') as f:
-                fd_info['maximum'] = int(f.read().strip())
-        except:
-            pass
-    except:
-        pass
-    return fd_info
+        # hwmon
+        hwmon_power = {}
+        hwmon_temp = {}
+        for hw in data.get('hwmon', []):
+            name = hw['name']
+            if hw['type'] == 'power':
+                hwmon_power[name] = hw['value']
+            elif hw['type'] == 'temp':
+                hwmon_temp[name] = hw['value']
+        metrics['node_hwmon_power'] = hwmon_power
+        metrics['node_hwmon_temp'] = hwmon_temp
 
+        # Thermal
+        thermal = {}
+        for zone in data.get('thermal', []):
+            thermal[zone['zone']] = zone['temp']
+        metrics['node_thermal'] = thermal
 
-def collect_metrics() -> dict:
-    """收集所有指标"""
-    metrics = {}
-    timestamp = time.time()
+        # Process stats
+        metrics['node_procs'] = data.get('loadproc', {})
 
-    # # CPU frequency
-    # max_freq, min_freq = get_cpu_freq()
-    # metrics['node_cpu_frequency_max_hertz'] = max_freq
-    # metrics['node_cpu_frequency_min_hertz'] = min_freq
+        # Boot time
+        metrics['node_boot_time_seconds'] = data.get('boot_time', 0)
 
-    # # CPU seconds
-    # cpu_stats = get_cpu_stats()
-    # if cpu_stats:
-    #     metrics['node_cpu_seconds_total'] = cpu_stats
+        # File descriptor
+        metrics['node_filefd'] = data.get('filefd', {})
 
-    # # Context switches
-    # ctx_switches = get_context_switches()
-    # if ctx_switches is not None:
-    #     metrics['node_context_switches_total'] = ctx_switches
+        # DMI
+        metrics['node_dmi_info'] = data.get('dmi', {})
 
-    # # Interrupts
-    # intr = get_intr()
-    # if intr is not None:
-    #     metrics['node_intr_total'] = intr
-    #
-    # # Memory
-    # meminfo = get_meminfo()
-    # metrics['node_memory_MemFree_bytes'] = meminfo.get('MemFree')
-    # metrics['node_memory_MemAvailable_bytes '] = meminfo.get('MemAvailable')
-    # metrics['node_memory_MemTotal_bytes'] = meminfo.get('MemTotal')
-    # metrics['node_memory_SwapFree_bytes'] = meminfo.get('SwapFree')
-    # metrics['node_memory_SwapTotal_bytes'] = meminfo.get('SwapTotal')
-    #
-    # # File descriptor
-    # fd_info = get_filefd_info()
-    # metrics['node_filefd_allocated'] = fd_info.get('allocated')
-    # metrics['node_filefd_maximum'] = fd_info.get('maximum')
+        # Mounts
+        metrics['node_mounts'] = data.get('mounts', [])
 
-    # # Filesystem
-    # metrics['filesystem'] = get_filesystem_info()
+        # Timestamp
+        metrics['node_time_seconds'] = int(time.time())
 
-    # # DMI info
-    # dmi = get_dmi_info()
-    # metrics['node_dmi_info'] = dmi
+        return metrics
 
-    # # Hwmon power
-    # hwmon_power = {}
-    # for hw in get_hwmon_info():
-    #     name = hw['name']
-    #     if hw['type'] == 'power':
-    #         if 'average' in hw['file']:
-    #             hwmon_power[name] = hw['value']
-    #         elif 'battery' in hw['file']:
-    #             hwmon_power[name] = hw['value']
-    #         else:
-    #             hwmon_power[name] = hw['value']
-    # metrics['node_hwmon_power_average_watt'] = hwmon_power
-    # metrics['node_hwmon_power_is_battery_watt'] = hwmon_power
-    # metrics['node_hwmon_power_average_interval_seconds'] = hwmon_power
-
-    # # Hwmon temp
-    # hwmon_temp = {}
-    # for hw in get_hwmon_info():
-    #     if hw['type'] == 'temp':
-    #         hwmon_temp[hw['name']] = hw['value']
-    # metrics['node_hwmon_temp_celsius'] = hwmon_temp
-    #
-    # # Thermal zones
-    # thermal = {}
-    # for zone in get_thermal_zones():
-    #     thermal[zone['zone']] = zone['temp']
-    # metrics['node_thermal_zone_temp'] = thermal
-    #
-    # # Disk stats
-    # # print(json.dumps(get_disk_stats(), indent=4, ensure_ascii=False))
-    # metrics['disk'] = get_disk_stats()
-
-    # # Boot time
-    # boot_time = get_boot_time()
-    # metrics['node_boot_time_seconds'] = boot_time
-    # metrics['node_time_seconds'] = int(timestamp)
-
-    # # OS info
-    # metrics['node_os_info'] = get_os_info()
-
-    # # Network
-    # metrics['network'] = get_network_stats()
-
-    # net_stats = {}
-    # for iface, stats in get_network_stats().items():
-    #     net_stats[iface] = {
-    #         'rx_bytes': stats['rx_bytes'],
-    #         'tx_bytes': stats['tx_bytes'],
-    #     }
-    # metrics['node_network_receive_bytes_total'] = net_stats
-    # metrics['node_network_transmit_bytes_total'] = net_stats
-    #
-    # # Netstat
-    # netstat = get_netstat_tcp_udp()
-    # metrics['node_netstat_Tcp_InSegs'] = netstat.get('tcp_in_segs')
-    # metrics['node_netstat_Tcp_OutSegs'] = netstat.get('tcp_out_segs')
-    # metrics['node_netstat_Udp_InDatagrams'] = netstat.get('udp_in_segs')
-    # metrics['node_netstat_Udp_OutDatagrams'] = netstat.get('udp_out_segs')
-    # metrics['node_netstat_Tcp_CurrEstab'] = netstat.get('tcp_curr_estab')
-    #
-    # # Sockstat
-    # sockstat = get_sockstat()
-    # metrics['node_sockstat_sockets_used'] = sockstat.get('sockets_used')
-    #
-    # # Schedstat
-    # schedstats = get_schedstats()
-    # metrics['node_schedstat_running_seconds_total'] = schedstats.get('running_seconds')
-    # metrics['node_schedstat_timeslices_total'] = schedstats.get('timeslices')
-    # metrics['node_schedstat_waiting_seconds_total'] = schedstats.get('waiting_seconds')
-    #
-    # # Load average
-    # load = get_loadavg()
-    # metrics['node_load1'] = load.get('load1')
-    # metrics['node_load5'] = load.get('load5')
-    # metrics['node_load15'] = load.get('load15')
-    #
-    # # Process stats
-    # proc_stats = get_process_stats()
-    # metrics['node_forks_total'] = proc_stats.get('forks_total')
-    # metrics['node_procs_running'] = proc_stats.get('procs_running')
-    # metrics['node_procs_blocked'] = proc_stats.get('procs_blocked')
-
-    return metrics
-
-
-def format_prometheus(metrics: dict) -> str:
-    """格式化输出为Prometheus文本格式"""
-    lines = []
-    for name, value in sorted(metrics.items()):
-        if '{' in name:
-            # Metric with labels
-            lines.append(f'{name} {value}')
-        else:
-            lines.append(f'{name} {value}')
-    return '\n'.join(lines)
+    def to_json(self) -> str:
+        """输出为 JSON 格式"""
+        return json.dumps(self.collect(), indent=4, ensure_ascii=False)
 
 
 if __name__ == '__main__':
-    import sys
-
-    if '--prometheus' in sys.argv:
-        print(format_prometheus(collect_metrics()))
-    else:
-        metrics = collect_metrics()
-        # for name, value in sorted(metrics.items()):
-        #     print(f'{name}: {value}')
-        print(json.dumps(metrics, indent=4, ensure_ascii=False))
+    collector = MetricsCollector()
+    print(collector.to_json())
