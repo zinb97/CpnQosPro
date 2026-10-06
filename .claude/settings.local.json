@@ -22,7 +22,9 @@
       "Bash(py -c \"from metrics_exporter import MetricsExporter; e = MetricsExporter\\(\\); print\\('collectors:', [type\\(c\\).__name__ for c in e.collectors]\\)\")",
       "Bash(py -c ':*)",
       "Bash(curl -sf -o /dev/null -w \"ECharts CDN HTTP %{http_code}\\\\n\" \"https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js\")",
-      "Bash(xxd \"D:/Project/CpnQosPro/backen/config/cluster_locations.yaml\")"
+      "Bash(xxd \"D:/Project/CpnQosPro/backen/config/cluster_locations.yaml\")",
+      "Bash(./.venv/Scripts/python.exe -m py_compile app/main.py app/routers/api.py app/routers/resource.py app/routers/shells.py app/menu.py)",
+      "Bash(grep:*)"
     ]
   }
 }

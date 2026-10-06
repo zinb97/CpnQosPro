@@ -39,12 +39,24 @@
         </button>
         <nav class="sidebar__nav">
           {% for item in menu_items %}
+          {% set item_active = (item.path == '/' and current_path == '/') or (item.path != '/' and current_path.startswith(item.path)) %}
           <div class="sidebar__group">
-            <a class="sidebar__item{% if (item.path == '/' and current_path == '/') or (item.path != '/' and current_path.startswith(item.path)) %} sidebar__item--active{% endif %}"
+            <a class="sidebar__item{% if item_active %} sidebar__item--active{% endif %}"
                href="{{ item.path }}">
               <span class="sidebar__icon">{{ item.icon | safe }}</span>
               <span class="sidebar__label">{{ item.label }}</span>
             </a>
+            {% if item.children and item_active %}
+            <div class="sidebar__children">
+              {% for child in item.children %}
+              <a class="sidebar__subitem{% if current_path == child.path %} sidebar__subitem--active{% endif %}"
+                 href="{{ child.path }}">
+                <span class="sidebar__subicon">{{ child.icon | safe }}</span>
+                <span>{{ child.label }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            {% endif %}
           </div>
           {% endfor %}
         </nav>

@@ -1,0 +1,173 @@
+{% extends "resource_base.html" %}
+
+{% block resource_content %}
+<div class="resource-padded">
+  <div class="resource-page__header">
+    <div>
+      <a id="backLink" href="/resource/clusters" class="back-link">← 返回集群列表</a>
+      <h1 class="resource-page__title" id="hostTitle">{{ instance }}</h1>
+      <p class="resource-page__subtitle">资源管控中心 / 主机详情</p>
+    </div>
+    <span class="status status--offline" id="hostStatus" hidden></span>
+  </div>
+
+  <div class="host-detail__metrics">
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">所属集群</span>
+        <div class="metric-card__icon metric-card__icon--purple">●</div>
+      </div>
+      <div class="metric-card__value" id="mCluster">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">抓取任务</span>
+        <div class="metric-card__icon metric-card__icon--blue">●</div>
+      </div>
+      <div class="metric-card__value" id="mJob" style="font-size:14px;">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">区域</span>
+        <div class="metric-card__icon metric-card__icon--green">●</div>
+      </div>
+      <div class="metric-card__value" id="mRegion">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">省份</span>
+        <div class="metric-card__icon metric-card__icon--yellow">●</div>
+      </div>
+      <div class="metric-card__value" id="mProvince">—</div>
+    </div>
+  </div>
+
+  <div class="panel" style="flex:1;min-height:0;">
+    <div class="panel__title">抓取信息</div>
+    <dl class="host-info">
+      <div><dt>Prometheus 地址</dt><dd id="iInstance">{{ instance }}</dd></div>
+      <div><dt>最近抓取时间</dt><dd id="iScrape">—</dd></div>
+      <div><dt>最近错误</dt><dd id="iError" class="host-info__error">—</dd></div>
+    </dl>
+  </div>
+</div>
+
+<style>
+  .resource-padded {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 16px;
+    padding: 16px;
+    overflow: hidden;
+  }
+  .resource-page__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .resource-page__title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 4px 0 0;
+    font-family: var(--font-mono);
+  }
+  .resource-page__subtitle {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin: 4px 0 0;
+  }
+  .back-link {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--color-accent); }
+  .host-detail__metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .host-info {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin: 0;
+  }
+  .host-info > div {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 12px;
+  }
+  .host-info dt {
+    color: var(--color-text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+  }
+  .host-info dd {
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    margin: 0;
+    word-break: break-all;
+  }
+  .host-info__error {
+    color: var(--color-danger);
+  }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const INSTANCE = {{ instance | tojson }};
+  const STATUS_LABEL = { healthy: '运行中', warning: '部分离线', offline: '离线', unknown: '未知' };
+  const STATUS_CLASS = { healthy: 'status--healthy', warning: 'status--warning', offline: 'status--offline', unknown: 'status--offline' };
+
+  function fmtTime(s) {
+    if (!s) return '—';
+    try { return new Date(s).toLocaleString('zh-CN', { hour12: false }); }
+    catch { return s; }
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/metrics/hosts/' + encodeURIComponent(INSTANCE));
+      if (r.status === 404) {
+        document.getElementById('hostTitle').textContent = '主机不存在';
+        return;
+      }
+      const d = await r.json();
+      document.getElementById('hostTitle').textContent = d.instance;
+      document.getElementById('mCluster').textContent = d.cluster_name || d.cluster_id || '—';
+      document.getElementById('mJob').textContent = d.job || '—';
+      document.getElementById('mRegion').textContent = d.region || '—';
+      document.getElementById('mProvince').textContent = d.province || '—';
+      document.getElementById('iScrape').textContent = fmtTime(d.last_scrape);
+      document.getElementById('iError').textContent = d.last_error || '无';
+
+      const status = d.health || 'unknown';
+      const badge = document.getElementById('hostStatus');
+      badge.hidden = false;
+      badge.className = 'status ' + (STATUS_CLASS[status] || 'status--offline');
+      badge.textContent = STATUS_LABEL[status] || status;
+
+      if (d.cluster_id) {
+        const back = document.getElementById('backLink');
+        back.href = '/resource/clusters/' + encodeURIComponent(d.cluster_id);
+        back.textContent = '← 返回集群 ' + (d.cluster_name || d.cluster_id);
+      }
+    } catch (e) {
+      console.error('主机详情加载失败:', e);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+{% endblock %}

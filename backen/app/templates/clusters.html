@@ -1,0 +1,199 @@
+{% extends "resource_base.html" %}
+
+{% block resource_content %}
+<div class="resource-padded">
+  <div class="resource-page__header">
+    <div>
+      <h1 class="resource-page__title">集群列表</h1>
+      <p class="resource-page__subtitle">资源管控中心 / 全部集群</p>
+    </div>
+    <div class="resource-page__header-right">
+      <span class="resource-page__hint">数据来源：Prometheus <code>/api/v1/targets</code></span>
+    </div>
+  </div>
+
+  <div id="clustersGrid" class="clusters-grid">
+    <div class="loading"><div class="loading__spinner"></div></div>
+  </div>
+</div>
+
+<style>
+  .resource-padded {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 16px;
+    padding: 16px;
+    overflow: hidden;
+  }
+  .resource-page__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .resource-page__title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 0;
+  }
+  .resource-page__subtitle {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin: 4px 0 0;
+  }
+  .resource-page__hint {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  .clusters-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .cluster-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+  }
+  .cluster-card:hover {
+    border-color: var(--color-accent);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(14, 165, 233, 0.15);
+  }
+  .cluster-card__top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .cluster-card__name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+  .cluster-card__id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin-top: 2px;
+  }
+  .cluster-card__meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+  .cluster-card__meta dt {
+    color: var(--color-text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+  }
+  .cluster-card__meta dd {
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    margin: 0;
+  }
+  .cluster-card__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--color-border);
+    padding-top: 12px;
+    font-size: 12px;
+  }
+  .cluster-card__nodes {
+    font-family: var(--font-mono);
+    color: var(--color-text-primary);
+  }
+  .cluster-card__nodes strong {
+    font-size: 16px;
+    margin-right: 2px;
+  }
+  .cluster-card__nodes .total {
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+  .empty-state {
+    grid-column: 1 / -1;
+    padding: 48px;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 13px;
+  }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const STATUS_LABEL = {
+    healthy: '运行中',
+    warning: '部分离线',
+    offline: '离线',
+    unknown: '未知',
+  };
+  const STATUS_CLASS = {
+    healthy: 'status--healthy',
+    warning: 'status--warning',
+    offline: 'status--offline',
+    unknown: 'status--offline',
+  };
+
+  function renderCluster(c) {
+    const status = c.status || 'unknown';
+    return `<a class="cluster-card" href="/resource/clusters/${encodeURIComponent(c.id)}">
+      <div class="cluster-card__top">
+        <div>
+          <div class="cluster-card__name">${c.name || c.id}</div>
+          <div class="cluster-card__id">${c.id}</div>
+        </div>
+        <span class="status ${STATUS_CLASS[status] || 'status--offline'}">${STATUS_LABEL[status] || status}</span>
+      </div>
+      <dl class="cluster-card__meta">
+        <div><dt>区域</dt><dd>${c.region || '—'}</dd></div>
+        <div><dt>省份</dt><dd>${c.province || '—'}</dd></div>
+      </dl>
+      <div class="cluster-card__footer">
+        <span class="cluster-card__nodes">
+          <strong>${c.online_nodes ?? 0}</strong>
+          <span class="total">/ ${c.total_nodes ?? 0} 节点在线</span>
+        </span>
+        <span style="color:var(--color-accent);font-size:11px;">查看详情 →</span>
+      </div>
+    </a>`;
+  }
+
+  async function refresh() {
+    const grid = document.getElementById('clustersGrid');
+    try {
+      const r = await fetch('/api/metrics/clusters');
+      const data = await r.json();
+      const items = data.items || [];
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty-state">暂无集群数据</div>';
+        return;
+      }
+      grid.innerHTML = items.map(renderCluster).join('');
+    } catch (e) {
+      grid.innerHTML = '<div class="empty-state">数据加载失败</div>';
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+{% endblock %}

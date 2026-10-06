@@ -14,13 +14,9 @@ router = APIRouter()
 
 
 # 外部子系统配置（路径 → {标题, iframe URL, sandbox}）
-# 顺序与侧边栏菜单一一对应。
+# 顺序与侧边栏菜单一一对应。`/resource` 不在此处：
+# 资源管控中心改由 `routers/resource.py` 提供原生页面（集群列表/详情/主机详情）。
 SHELLS = {
-    "/resource": {
-        "title": "资源管控中心",
-        "iframe_url": "http://192.168.10.31:3000/goto/cg07s2sm4a134a?orgId=default",
-        "sandbox": "allow-scripts allow-same-origin allow-forms",
-    },
     "/network": {
         "title": "网络管控中心",
         "iframe_url": "http://192.168.10.31:8080/",

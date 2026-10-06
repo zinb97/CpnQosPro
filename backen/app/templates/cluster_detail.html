@@ -1,0 +1,204 @@
+{% extends "resource_base.html" %}
+
+{% block resource_content %}
+<div class="resource-padded">
+  <div class="resource-page__header">
+    <div>
+      <a href="/resource/clusters" class="back-link">← 返回集群列表</a>
+      <h1 class="resource-page__title" id="clusterTitle">{{ cluster_id }}</h1>
+      <p class="resource-page__subtitle">资源管控中心 / 集群详情</p>
+    </div>
+    <span class="status status--offline" id="clusterStatus" hidden></span>
+  </div>
+
+  <div class="cluster-detail__metrics">
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">在线节点</span>
+        <div class="metric-card__icon metric-card__icon--green">●</div>
+      </div>
+      <div class="metric-card__value" id="mOnline">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">总节点</span>
+        <div class="metric-card__icon metric-card__icon--blue">●</div>
+      </div>
+      <div class="metric-card__value" id="mTotal">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">区域</span>
+        <div class="metric-card__icon metric-card__icon--purple">●</div>
+      </div>
+      <div class="metric-card__value" id="mRegion">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-card__header">
+        <span class="metric-card__label">省份</span>
+        <div class="metric-card__icon metric-card__icon--yellow">●</div>
+      </div>
+      <div class="metric-card__value" id="mProvince">—</div>
+    </div>
+  </div>
+
+  <div class="panel" style="flex:1;min-height:0;">
+    <div class="panel__title">节点列表</div>
+    <table class="nodes-table" id="nodesTable">
+      <thead>
+        <tr>
+          <th>地址</th>
+          <th>抓取任务</th>
+          <th>状态</th>
+          <th>最近抓取</th>
+          <th>错误</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="5" class="nodes-table__empty">加载中...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .resource-padded {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 16px;
+    padding: 16px;
+    overflow: hidden;
+  }
+  .resource-page__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .resource-page__title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 4px 0 0;
+  }
+  .resource-page__subtitle {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin: 4px 0 0;
+  }
+  .back-link {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+  }
+  .back-link:hover { color: var(--color-accent); }
+  .cluster-detail__metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .nodes-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    overflow-y: auto;
+  }
+  .nodes-table thead th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    position: sticky;
+    top: 0;
+  }
+  .nodes-table tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+  }
+  .nodes-table tbody tr {
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+  .nodes-table tbody tr:hover {
+    background: var(--color-bg-card-hover);
+  }
+  .nodes-table__empty {
+    text-align: center;
+    padding: 24px !important;
+    color: var(--color-text-muted);
+  }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const CLUSTER_ID = {{ cluster_id | tojson }};
+  const STATUS_LABEL = { healthy: '运行中', warning: '部分离线', offline: '离线', unknown: '未知' };
+  const STATUS_CLASS = { healthy: 'status--healthy', warning: 'status--warning', offline: 'status--offline', unknown: 'status--offline' };
+
+  function fmtTime(s) {
+    if (!s) return '—';
+    try {
+      return new Date(s).toLocaleString('zh-CN', { hour12: false });
+    } catch { return s; }
+  }
+
+  function render(nodes) {
+    const tbody = document.querySelector('#nodesTable tbody');
+    if (!nodes || !nodes.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="nodes-table__empty">该集群下暂无节点</td></tr>';
+      return;
+    }
+    tbody.innerHTML = nodes.map((n) => {
+      const health = n.health || 'unknown';
+      return `<tr data-instance="${n.instance}">
+        <td>${n.instance || '—'}</td>
+        <td>${n.job || '—'}</td>
+        <td><span class="status ${STATUS_CLASS[health] || 'status--offline'}">${STATUS_LABEL[health] || health}</span></td>
+        <td style="font-size:11px;color:var(--color-text-secondary);">${fmtTime(n.last_scrape)}</td>
+        <td style="color:var(--color-danger);font-size:11px;">${n.last_error || ''}</td>
+      </tr>`;
+    }).join('');
+    tbody.querySelectorAll('tr[data-instance]').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const inst = tr.dataset.instance;
+        if (inst) location.href = '/resource/hosts/' + encodeURIComponent(inst);
+      });
+    });
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/metrics/clusters/' + encodeURIComponent(CLUSTER_ID));
+      if (r.status === 404) {
+        document.getElementById('clusterTitle').textContent = '集群不存在';
+        return;
+      }
+      const d = await r.json();
+      document.getElementById('clusterTitle').textContent = d.name || d.id;
+      document.getElementById('mRegion').textContent = d.region || '—';
+      document.getElementById('mProvince').textContent = d.province || '—';
+      document.getElementById('mOnline').textContent = d.online_nodes ?? 0;
+      document.getElementById('mTotal').textContent = d.total_nodes ?? 0;
+      const status = d.status || 'unknown';
+      const badge = document.getElementById('clusterStatus');
+      badge.hidden = false;
+      badge.className = 'status ' + (STATUS_CLASS[status] || 'status--offline');
+      badge.textContent = STATUS_LABEL[status] || status;
+      render(d.nodes || []);
+    } catch (e) {
+      console.error('集群详情加载失败:', e);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+{% endblock %}

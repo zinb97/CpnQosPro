@@ -1,6 +1,6 @@
 """侧边栏菜单配置 + SVG 图标。
 
-每项含 id / label / path / icon（内联 SVG 字符串）。
+每项含 id / label / path / icon（内联 SVG 字符串）/ 可选 children（子菜单）。
 供 Jinja2 模板直接渲染，模板只需遍历 menu_items 即可。
 """
 from __future__ import annotations
@@ -8,11 +8,12 @@ from __future__ import annotations
 from typing import TypedDict
 
 
-class MenuItem(TypedDict):
+class MenuItem(TypedDict, total=False):
     id: str
     label: str
     path: str
     icon: str  # 内联 SVG
+    children: list["MenuItem"]  # 可选：子菜单
 
 
 _DASHBOARD_SVG = (
@@ -68,11 +69,34 @@ _COMPUTE_SVG = (
     '<line x1="1" y1="14" x2="4" y2="14"/>'
     "</svg>"
 )
+_CLUSTERS_SVG = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<rect x="3" y="3" width="7" height="7" rx="1"/>'
+    '<rect x="14" y="3" width="7" height="7" rx="1"/>'
+    '<rect x="3" y="14" width="7" height="7" rx="1"/>'
+    '<rect x="14" y="14" width="7" height="7" rx="1"/>'
+    "</svg>"
+)
+_GRAFANA_SVG = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<polyline points="3 17 9 11 13 15 21 7"/>'
+    '<polyline points="14 7 21 7 21 14"/>'
+    "</svg>"
+)
 
 
 MENU_ITEMS: list[MenuItem] = [
     {"id": "dashboard", "label": "态势总览大屏", "path": "/", "icon": _DASHBOARD_SVG},
-    {"id": "resource", "label": "资源管控中心", "path": "/resource", "icon": _RESOURCE_SVG},
+    {
+        "id": "resource",
+        "label": "资源管控中心",
+        "path": "/resource",
+        "icon": _RESOURCE_SVG,
+        "children": [
+            {"id": "clusters", "label": "集群列表", "path": "/resource/clusters", "icon": _CLUSTERS_SVG},
+            {"id": "resource_iframe", "label": "Grafana 总览", "path": "/resource/iframe", "icon": _GRAFANA_SVG},
+        ],
+    },
     {"id": "network", "label": "网络管控中心", "path": "/network", "icon": _NETWORK_SVG},
     {"id": "task", "label": "任务调度中心", "path": "/task", "icon": _TASK_SVG},
     {"id": "telemetry", "label": "带内全网遥测", "path": "/telemetry", "icon": _TELEMETRY_SVG},

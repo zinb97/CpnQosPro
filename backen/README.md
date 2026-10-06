@@ -116,4 +116,4 @@ uvicorn app.main:app --reload
 # - http://localhost:8080/  → Dashboard
 # - http://localhost:8080/resource 等 5 个 iframe 页
 # - http://localhost:8080/api/metrics/overview  → JSON
-```
+``` 

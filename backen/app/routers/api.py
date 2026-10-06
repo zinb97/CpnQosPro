@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.prometheus.client import PrometheusClient
@@ -312,3 +312,144 @@ async def events(request: Request) -> JSONResponse:
             "severity": labels.get("severity", ""),
         })
     return cache_response({"items": items}, max_age=request.app.state.settings.cards_cache_s)
+
+
+# ===== 资源管控中心页面数据 =====
+
+
+async def _list_node_targets(request: Request) -> list[dict[str, Any]]:
+    """取 /api/v1/targets 中 `job` 以 `node-` 开头的目标列表。"""
+    try:
+        targets = await _client(request).targets()
+    except Exception:
+        return []
+    return [t for t in targets if (t.get("labels") or {}).get("job", "").startswith("node-")]
+
+
+@router.get("/clusters")
+async def clusters(request: Request) -> JSONResponse:
+    """集群列表：按 cluster_id 聚合节点目标，叠加 yaml 元数据。
+
+    每项含：id, name, region, province, location, online_nodes, total_nodes, status。
+    Prometheus 不可达时降级为仅展示 yaml 元数据（status='unknown'）。
+    """
+    cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
+    node_targets = await _list_node_targets(request)
+
+    online_by_cluster: dict[str, int] = {}
+    total_by_cluster: dict[str, int] = {}
+    for t in node_targets:
+        labels = t.get("labels") or {}
+        cid = labels.get("cluster", "")
+        if not cid:
+            continue
+        total_by_cluster[cid] = total_by_cluster.get(cid, 0) + 1
+        if t.get("health") == "up":
+            online_by_cluster[cid] = online_by_cluster.get(cid, 0) + 1
+
+    items: list[dict[str, Any]] = []
+    for cid, meta in cluster_meta.items():
+        total = total_by_cluster.get(cid, 0)
+        online = online_by_cluster.get(cid, 0)
+        if total == 0 and not node_targets:
+            status = "unknown"
+        elif total == 0:
+            status = "offline"
+        elif online == total:
+            status = "healthy"
+        elif online == 0:
+            status = "offline"
+        else:
+            status = "warning"
+        items.append({
+            "id": cid,
+            "name": meta.get("name", cid),
+            "region": meta.get("region", ""),
+            "province": meta.get("province", ""),
+            "location": meta.get("location", [0, 0]),
+            "online_nodes": online,
+            "total_nodes": total,
+            "status": status,
+        })
+
+    return cache_response({"items": items}, max_age=request.app.state.settings.cards_cache_s)
+
+
+@router.get("/clusters/{cluster_id}")
+async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
+    """集群详情：集群元数据 + 节点列表 + 聚合指标。"""
+    cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
+    meta = cluster_meta.get(cluster_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"cluster '{cluster_id}' not found")
+
+    node_targets = await _list_node_targets(request)
+    nodes: list[dict[str, Any]] = []
+    online = total = 0
+    for t in node_targets:
+        labels = t.get("labels") or {}
+        if labels.get("cluster") != cluster_id:
+            continue
+        total += 1
+        health = t.get("health")
+        if health == "up":
+            online += 1
+        nodes.append({
+            "instance": labels.get("instance", ""),
+            "job": labels.get("job", ""),
+            "health": health or "unknown",
+            "last_scrape": t.get("lastScrape"),
+            "last_error": t.get("lastError"),
+        })
+
+    if total == 0 and not node_targets:
+        status = "unknown"
+    elif online == total and total > 0:
+        status = "healthy"
+    elif online == 0:
+        status = "offline"
+    else:
+        status = "warning"
+
+    payload = {
+        **meta,
+        "id": cluster_id,
+        "status": status,
+        "online_nodes": online,
+        "total_nodes": total,
+        "nodes": nodes,
+    }
+    return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
+
+
+@router.get("/hosts/{instance:path}")
+async def host_detail(instance: str, request: Request) -> JSONResponse:
+    """主机详情：从 /api/v1/targets 中按 instance 字段定位单条 node-* 目标。"""
+    cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
+    node_targets = await _list_node_targets(request)
+
+    target = next(
+        (
+            t for t in node_targets
+            if (t.get("labels") or {}).get("instance") == instance
+        ),
+        None,
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail=f"host '{instance}' not found")
+
+    labels = target.get("labels") or {}
+    cid = labels.get("cluster", "")
+    cluster = cluster_meta.get(cid, {})
+    payload = {
+        "instance": instance,
+        "job": labels.get("job", ""),
+        "cluster_id": cid,
+        "cluster_name": cluster.get("name", cid),
+        "region": cluster.get("region", ""),
+        "province": cluster.get("province", ""),
+        "health": target.get("health") or "unknown",
+        "last_scrape": target.get("lastScrape"),
+        "last_error": target.get("lastError"),
+    }
+    return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
