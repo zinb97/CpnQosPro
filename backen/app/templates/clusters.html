@@ -8,7 +8,6 @@
       <p class="resource-page__subtitle">资源管控中心 / 全部集群</p>
     </div>
     <div class="resource-page__header-right">
-      <span class="resource-page__hint">数据来源：Prometheus <code>/api/v1/targets</code></span>
     </div>
   </div>
 
@@ -49,7 +48,7 @@
   }
   .clusters-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 12px;
     overflow-y: auto;
     padding-right: 4px;
@@ -92,7 +91,7 @@
   .cluster-card__meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
+    gap: 6px 12px;
     font-size: 12px;
     color: var(--color-text-secondary);
   }
@@ -108,12 +107,50 @@
     font-family: var(--font-mono);
     margin: 0;
   }
+  .cluster-card__metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid var(--color-border);
+    padding-top: 12px;
+  }
+  .metric-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 56px;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+  .metric-row__label {
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .metric-row__bar {
+    height: 6px;
+    background: var(--color-bg-secondary);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .metric-row__fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .metric-row__fill--low { background: var(--color-success); }
+  .metric-row__fill--mid { background: var(--color-warning); }
+  .metric-row__fill--high { background: var(--color-danger); }
+  .metric-row__value {
+    font-family: var(--font-mono);
+    color: var(--color-text-primary);
+    text-align: right;
+  }
   .cluster-card__footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
     border-top: 1px solid var(--color-border);
-    padding-top: 12px;
+    padding-top: 10px;
     font-size: 12px;
   }
   .cluster-card__nodes {
@@ -153,8 +190,35 @@
     unknown: 'status--offline',
   };
 
+  function fmtBytes(n) {
+    if (n == null) return '—';
+    const units = ['B', 'KB', 'GB', 'TB', 'PB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(n >= 100 ? 0 : 1) + ' ' + units[i];
+  }
+
+  function pctClass(v) {
+    if (v == null) return 'metric-row__fill--low';
+    if (v >= 85) return 'metric-row__fill--high';
+    if (v >= 60) return 'metric-row__fill--mid';
+    return 'metric-row__fill--low';
+  }
+
+  function metricRow(label, value, suffix, pctValue) {
+    const display = value == null ? '—' : value + (suffix || '');
+    const width = pctValue == null ? 0 : Math.min(100, pctValue);
+    return `<div class="metric-row">
+      <span class="metric-row__label">${label}</span>
+      <div class="metric-row__bar"><div class="metric-row__fill ${pctClass(pctValue)}" style="width:${width}%"></div></div>
+      <span class="metric-row__value">${display}</span>
+    </div>`;
+  }
+
   function renderCluster(c) {
     const status = c.status || 'unknown';
+    const cores = c.cpu_cores != null ? c.cpu_cores + ' 核' : '—';
+    const mem = c.mem_total_bytes != null ? fmtBytes(c.mem_total_bytes) : '—';
     return `<a class="cluster-card" href="/resource/clusters/${encodeURIComponent(c.id)}">
       <div class="cluster-card__top">
         <div>
@@ -166,7 +230,15 @@
       <dl class="cluster-card__meta">
         <div><dt>区域</dt><dd>${c.region || '—'}</dd></div>
         <div><dt>省份</dt><dd>${c.province || '—'}</dd></div>
+        <div><dt>CPU 核数</dt><dd>${cores}</dd></div>
+        <div><dt>内存</dt><dd>${mem}</dd></div>
       </dl>
+      <div class="cluster-card__metrics">
+        ${metricRow('CPU', c.cpu_usage, '%', c.cpu_usage)}
+        ${metricRow('内存', c.mem_usage, '%', c.mem_usage)}
+        ${metricRow('负载', c.load1, '', c.load1 != null ? Math.min(100, c.load1 * 25) : null)}
+        ${metricRow('温度', c.max_temp_c, '°C', c.max_temp_c != null ? Math.min(100, c.max_temp_c) : null)}
+      </div>
       <div class="cluster-card__footer">
         <span class="cluster-card__nodes">
           <strong>${c.online_nodes ?? 0}</strong>

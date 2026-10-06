@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,22 @@ from app.prometheus.queries import (
     Q_POLICIES,
     Q_SLICES,
     Q_SWITCHES,
+    q_cluster_cpu_cores,
+    q_cluster_cpu_usage,
+    q_cluster_load,
+    q_cluster_max_temp,
+    q_cluster_mem_total,
+    q_cluster_mem_usage,
+    q_node_boot_time,
+    q_node_cpu_usage,
+    q_node_disk_total,
+    q_node_load1,
+    q_node_max_temp,
+    q_node_mem_avail,
+    q_node_mem_total,
+    q_node_network_rx,
+    q_node_network_tx,
+    q_node_procs_running,
 )
 
 
@@ -55,6 +72,25 @@ def metric_card(value: float | None, unit: str) -> dict[str, Any]:
     if unit == "TB":
         return {"value": round(value / BYTES_PER_TB, 1), "unit": unit}
     return {"value": int(value), "unit": unit}
+
+
+def _round(value: float | None, digits: int) -> float | None:
+    return round(value, digits) if value is not None else None
+
+
+def _round_pct(value: float | None) -> float | None:
+    """百分比（0~1 → 0~100，保留 1 位小数）。None 透传。"""
+    return round(value * 100, 1) if value is not None else None
+
+
+def _first_scalar(results_list: Any, idx: int) -> float | None:
+    """从并发结果集（list 或 Exception）中按索引取第一条数值。失败返回 None。"""
+    if isinstance(results_list, Exception) or not isinstance(results_list, list):
+        return None
+    try:
+        return _scalar(results_list[idx])
+    except (IndexError, TypeError):
+        return None
 
 
 def cache_response(content: Any, max_age: int) -> JSONResponse:
@@ -113,7 +149,6 @@ async def overview(request: Request) -> JSONResponse:
     cli = _client(request)
 
     # 并发：1 个 /targets + 6 条 PromQL
-    import asyncio
     results = await asyncio.gather(
         cli.targets(),
         cli.query(Q_CPU_CORES),
@@ -328,10 +363,11 @@ async def _list_node_targets(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/clusters")
 async def clusters(request: Request) -> JSONResponse:
-    """集群列表：按 cluster_id 聚合节点目标，叠加 yaml 元数据。
+    """集群列表：按 cluster_id 聚合节点目标，叠加 yaml 元数据 + 实时聚合指标。
 
-    每项含：id, name, region, province, location, online_nodes, total_nodes, status。
-    Prometheus 不可达时降级为仅展示 yaml 元数据（status='unknown'）。
+    每项含：id, name, region, province, location, online_nodes, total_nodes, status,
+            cpu_usage, mem_usage, load1, cpu_cores, mem_total, max_temp。
+    Prometheus 不可达时降级为仅展示 yaml 元数据（status='unknown'，指标字段为 null）。
     """
     cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
     node_targets = await _list_node_targets(request)
@@ -347,8 +383,30 @@ async def clusters(request: Request) -> JSONResponse:
         if t.get("health") == "up":
             online_by_cluster[cid] = online_by_cluster.get(cid, 0) + 1
 
+    # 并发拉取每个集群的聚合指标（无集群则跳过）
+    cids = list(cluster_meta.keys())
+    prom_results = await asyncio.gather(
+        *(
+            asyncio.gather(
+                _safe_query(request, q_cluster_cpu_usage(cid)),
+                _safe_query(request, q_cluster_mem_usage(cid)),
+                _safe_query(request, q_cluster_load(cid)),
+                _safe_query(request, q_cluster_cpu_cores(cid)),
+                _safe_query(request, q_cluster_mem_total(cid)),
+                _safe_query(request, q_cluster_max_temp(cid)),
+                return_exceptions=True,
+            )
+            for cid in cids
+        ),
+        return_exceptions=True,
+    )
+
     items: list[dict[str, Any]] = []
     for cid, meta in cluster_meta.items():
+        try:
+            row = prom_results[cids.index(cid)]
+        except (ValueError, IndexError):
+            row = None
         total = total_by_cluster.get(cid, 0)
         online = online_by_cluster.get(cid, 0)
         if total == 0 and not node_targets:
@@ -361,6 +419,14 @@ async def clusters(request: Request) -> JSONResponse:
             status = "offline"
         else:
             status = "warning"
+
+        cpu_usage = _first_scalar(row, 0)
+        mem_usage = _first_scalar(row, 1)
+        load1 = _first_scalar(row, 2)
+        cpu_cores = _first_scalar(row, 3)
+        mem_total = _first_scalar(row, 4)
+        max_temp = _first_scalar(row, 5)
+
         items.append({
             "id": cid,
             "name": meta.get("name", cid),
@@ -370,6 +436,12 @@ async def clusters(request: Request) -> JSONResponse:
             "online_nodes": online,
             "total_nodes": total,
             "status": status,
+            "cpu_usage": _round_pct(cpu_usage),
+            "mem_usage": _round_pct(mem_usage),
+            "load1": _round(load1, 2),
+            "cpu_cores": int(cpu_cores) if cpu_cores is not None else None,
+            "mem_total_bytes": int(mem_total) if mem_total is not None else None,
+            "max_temp_c": _round(max_temp, 1),
         })
 
     return cache_response({"items": items}, max_age=request.app.state.settings.cards_cache_s)
@@ -377,30 +449,82 @@ async def clusters(request: Request) -> JSONResponse:
 
 @router.get("/clusters/{cluster_id}")
 async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
-    """集群详情：集群元数据 + 节点列表 + 聚合指标。"""
+    """集群详情：集群元数据 + 节点列表（每节点附实时指标）+ 集群聚合指标。"""
     cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
     meta = cluster_meta.get(cluster_id)
     if not meta:
         raise HTTPException(status_code=404, detail=f"cluster '{cluster_id}' not found")
 
     node_targets = await _list_node_targets(request)
-    nodes: list[dict[str, Any]] = []
-    online = total = 0
+    # 提取本集群下节点的 instance 列表
+    cluster_nodes: list[dict[str, Any]] = []
     for t in node_targets:
         labels = t.get("labels") or {}
         if labels.get("cluster") != cluster_id:
             continue
-        total += 1
-        health = t.get("health")
-        if health == "up":
-            online += 1
-        nodes.append({
+        cluster_nodes.append({
             "instance": labels.get("instance", ""),
             "job": labels.get("job", ""),
-            "health": health or "unknown",
+            "health": t.get("health") or "unknown",
             "last_scrape": t.get("lastScrape"),
             "last_error": t.get("lastError"),
         })
+
+    # 并发查询：本集群聚合 + 每节点 6 个指标
+    agg_results = await asyncio.gather(
+        _safe_query(request, q_cluster_cpu_usage(cluster_id)),
+        _safe_query(request, q_cluster_mem_usage(cluster_id)),
+        _safe_query(request, q_cluster_load(cluster_id)),
+        _safe_query(request, q_cluster_cpu_cores(cluster_id)),
+        _safe_query(request, q_cluster_mem_total(cluster_id)),
+        _safe_query(request, q_cluster_max_temp(cluster_id)),
+        return_exceptions=True,
+    )
+
+    # 每节点指标：6 个 PromQL × N 节点 → asyncio.gather 二维并发
+    node_query_jobs = []
+    for n in cluster_nodes:
+        inst = n["instance"]
+        if not inst:
+            node_query_jobs.append(asyncio.gather(*(asyncio.sleep(0) for _ in range(6)), return_exceptions=True))
+            continue
+        node_query_jobs.append(asyncio.gather(
+            _safe_query(request, q_node_cpu_usage(inst)),
+            _safe_query(request, q_node_load1(inst)),
+            _safe_query(request, q_node_mem_total(inst)),
+            _safe_query(request, q_node_mem_avail(inst)),
+            _safe_query(request, q_node_max_temp(inst)),
+            _safe_query(request, q_node_procs_running(inst)),
+            return_exceptions=True,
+        ))
+    per_node_results = await asyncio.gather(*node_query_jobs, return_exceptions=True)
+
+    nodes_out: list[dict[str, Any]] = []
+    online = total = 0
+    for n, nr in zip(cluster_nodes, per_node_results):
+        if n["health"] == "up":
+            online += 1
+        total += 1
+        cpu = _first_scalar(nr, 0)
+        load1 = _first_scalar(nr, 1)
+        mem_total = _first_scalar(nr, 2)
+        mem_avail = _first_scalar(nr, 3)
+        max_temp = _first_scalar(nr, 4)
+        procs = _first_scalar(nr, 5)
+        mem_usage = (
+            (mem_total - mem_avail) / mem_total if (mem_total and mem_avail is not None and mem_total > 0) else None
+        )
+        n_out = dict(n)
+        n_out.update({
+            "cpu_usage": _round_pct(cpu),
+            "load1": _round(load1, 2),
+            "mem_total_bytes": int(mem_total) if mem_total is not None else None,
+            "mem_used_bytes": int(mem_total - mem_avail) if (mem_total is not None and mem_avail is not None) else None,
+            "mem_usage": _round_pct(mem_usage),
+            "max_temp_c": _round(max_temp, 1),
+            "procs_running": int(procs) if procs is not None else None,
+        })
+        nodes_out.append(n_out)
 
     if total == 0 and not node_targets:
         status = "unknown"
@@ -411,20 +535,37 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
     else:
         status = "warning"
 
+    def _agg(idx: int):
+        r = agg_results[idx]
+        return _scalar(r) if isinstance(r, list) else None
+
     payload = {
         **meta,
         "id": cluster_id,
         "status": status,
         "online_nodes": online,
         "total_nodes": total,
-        "nodes": nodes,
+        "cpu_usage": _round_pct(_agg(0)),
+        "mem_usage": _round_pct(_agg(1)),
+        "load1": _round(_agg(2), 2),
+        "cpu_cores": int(_agg(3)) if _agg(3) is not None else None,
+        "mem_total_bytes": int(_agg(4)) if _agg(4) is not None else None,
+        "max_temp_c": _round(_agg(5), 1),
+        "nodes": nodes_out,
     }
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
 
 
 @router.get("/hosts/{instance:path}")
 async def host_detail(instance: str, request: Request) -> JSONResponse:
-    """主机详情：从 /api/v1/targets 中按 instance 字段定位单条 node-* 目标。"""
+    """主机详情：从 /api/v1/targets 中按 instance 字段定位单条 node-* 目标。
+
+    返回：
+    - 抓取信息（health/lastScrape/lastError）
+    - 集群归属
+    - 8 类实时指标（CPU/内存/负载/温度/进程/网络/磁盘/启动时间）
+    - 系统信息（uname/os/dmi，从 node_*_info 元指标标签解析）
+    """
     cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
     node_targets = await _list_node_targets(request)
 
@@ -441,6 +582,46 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
     labels = target.get("labels") or {}
     cid = labels.get("cluster", "")
     cluster = cluster_meta.get(cid, {})
+
+    # 并发查询：8 类指标 + 3 个元指标
+    (
+        cpu, load1, mem_total, mem_avail, max_temp, procs,
+        boot_time, disk_io, net_rx, net_tx,
+        uname_info, os_info, dmi_info,
+    ) = await asyncio.gather(
+        _safe_query(request, q_node_cpu_usage(instance)),
+        _safe_query(request, q_node_load1(instance)),
+        _safe_query(request, q_node_mem_total(instance)),
+        _safe_query(request, q_node_mem_avail(instance)),
+        _safe_query(request, q_node_max_temp(instance)),
+        _safe_query(request, q_node_procs_running(instance)),
+        _safe_query(request, q_node_boot_time(instance)),
+        _safe_query(request, q_node_disk_total(instance)),
+        _safe_query(request, q_node_network_rx(instance)),
+        _safe_query(request, q_node_network_tx(instance)),
+        _safe_query(request, f'node_uname_info{{instance="{instance}"}}'),
+        _safe_query(request, f'node_os_info{{instance="{instance}"}}'),
+        _safe_query(request, f'node_dmi_info{{instance="{instance}"}}'),
+        return_exceptions=True,
+    )
+
+    def _q(r) -> float | None:
+        return _scalar(r) if isinstance(r, list) else None
+
+    def _info(r) -> dict[str, str]:
+        if not isinstance(r, list) or not r:
+            return {}
+        out: dict[str, str] = {}
+        for k, v in (r[0].get("metric") or {}).items():
+            if k in ("__name__", "instance", "job", "cluster"):
+                continue
+            out[k] = str(v)
+        return out
+
+    mem_total_v = _q(mem_total)
+    mem_avail_v = _q(mem_avail)
+    mem_used_v = (mem_total_v - mem_avail_v) if (mem_total_v is not None and mem_avail_v is not None) else None
+
     payload = {
         "instance": instance,
         "job": labels.get("job", ""),
@@ -451,5 +632,23 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         "health": target.get("health") or "unknown",
         "last_scrape": target.get("lastScrape"),
         "last_error": target.get("lastError"),
+
+        # 实时指标
+        "cpu_usage": _round_pct(_q(cpu)),
+        "load1": _round(_q(load1), 2),
+        "mem_total_bytes": int(mem_total_v) if mem_total_v is not None else None,
+        "mem_used_bytes": int(mem_used_v) if mem_used_v is not None else None,
+        "mem_usage": _round_pct(mem_used_v / mem_total_v) if (mem_used_v is not None and mem_total_v) else None,
+        "max_temp_c": _round(_q(max_temp), 1),
+        "procs_running": int(_q(procs)) if _q(procs) is not None else None,
+        "boot_time": int(_q(boot_time)) if _q(boot_time) is not None else None,
+        "disk_io_bytes_per_sec": _round(_q(disk_io), 0),
+        "net_rx_bytes_per_sec": _round(_q(net_rx), 0),
+        "net_tx_bytes_per_sec": _round(_q(net_tx), 0),
+
+        # 系统信息
+        "uname": _info(uname_info),
+        "os": _info(os_info),
+        "dmi": _info(dmi_info),
     }
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)

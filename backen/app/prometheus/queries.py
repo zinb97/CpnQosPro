@@ -41,6 +41,106 @@ Q_POLICIES = "qos_policy_info"
 Q_EVENTS = "ALERTS"
 
 
+# ===== 资源管控中心页面 PromQL 模板 =====
+# collector 暴露的指标命名遵循 Prometheus node_exporter 风格：
+#   node_cpu_seconds_total{mode="..."}      CPU 各模式累计秒
+#   node_memory_MemTotal_bytes / MemAvailable_bytes / MemFree_bytes
+#   node_load1 / node_load5 / node_load15
+#   node_filesystem_size_bytes / node_filesystem_avail_bytes
+#   node_thermal_zone_temp{zone, type}
+#   node_network_receive_bytes_total / node_network_transmit_bytes_total
+#   node_uname_info{...} / node_os_info{...} / node_dmi_info{...}
+#   node_procs_running / node_procs_blocked / node_boot_time_seconds
+#
+# scrape 配置会注入 labels.cluster（每个节点归到自己的集群）和 labels.instance。
+# 集群聚合用 `by(cluster)`，节点级过滤用 `{instance="..."}` 或 `{cluster="..."}`。
+
+
+def q_cluster_cpu_usage(cluster_id: str) -> str:
+    """集群 CPU 平均使用率（1m 窗口）。
+    """
+    return (
+        f'avg by(cluster) (1 - avg by(instance) (avg by(cpu, instance) (rate(node_cpu_seconds_total{{cluster="{cluster_id}",mode="idle",cpu!=""}}[1m]))))'
+    )
+
+def q_cluster_mem_usage(cluster_id: str) -> str:
+    """集群内存使用率：1 - MemAvailable / MemTotal。"""
+    return (
+        f'avg by(cluster) (1 - '
+        f'node_memory_MemAvailable_bytes{{cluster="{cluster_id}"}}'
+        f'/ node_memory_MemTotal_bytes{{cluster="{cluster_id}"}})'
+    )
+
+
+def q_cluster_load(cluster_id: str) -> str:
+    """集群 1 分钟负载均值。"""
+    return f'avg by(cluster) (node_load1{{cluster="{cluster_id}"}})'
+
+
+def q_cluster_cpu_cores(cluster_id: str) -> str:
+    """集群 CPU 核心总数（各节点 cores 之和）。"""
+    return (
+        f'count by(cluster) '
+        f'(node_cpu_seconds_total{{cluster="{cluster_id}",mode="system",cpu!=""}})'
+    )
+
+
+def q_cluster_mem_total(cluster_id: str) -> str:
+    """集群内存总字节数。"""
+    return f'sum by(cluster) (node_memory_MemTotal_bytes{{cluster="{cluster_id}"}})'
+
+
+def q_cluster_max_temp(cluster_id: str) -> str:
+    """集群最高温度（°C）。"""
+    return f'max by(cluster) (node_thermal_zone_temp{{cluster="{cluster_id}"}})'
+
+
+def q_node_cpu_usage(instance: str) -> str:
+    """单节点 CPU 使用率（1m 窗口）。"""
+    return (
+        f'1 - avg by(instance) (sum by(instance,cpu) (rate(node_cpu_seconds_total{{instance="{instance}",mode="idle",cpu!=""}}[1m])))'
+    )
+
+def q_node_load1(instance: str) -> str:
+    return f'node_load1{{instance="{instance}"}}'
+
+
+def q_node_mem_total(instance: str) -> str:
+    return f'node_memory_MemTotal_bytes{{instance="{instance}"}}'
+
+
+def q_node_mem_avail(instance: str) -> str:
+    return f'node_memory_MemAvailable_bytes{{instance="{instance}"}}'
+
+
+def q_node_procs_running(instance: str) -> str:
+    return f'node_procs_running{{instance="{instance}"}}'
+
+
+def q_node_boot_time(instance: str) -> str:
+    return f'node_boot_time_seconds{{instance="{instance}"}}'
+
+
+def q_node_max_temp(instance: str) -> str:
+    return f'max(node_thermal_zone_temp{{instance="{instance}"}})'
+
+
+def q_node_disk_total(instance: str) -> str:
+    """单节点所有块设备读取+写入速率（bytes/s, 5m 窗口）— 反映磁盘 IO 繁忙程度。"""
+    return (
+        f'sum(rate(node_disk_read_bytes_total{{instance="{instance}"}}[5m]))'
+        f' + sum(rate(node_disk_written_bytes_total{{instance="{instance}"}}[5m]))'
+    )
+
+
+def q_node_network_rx(instance: str) -> str:
+    return f'sum(rate(node_network_receive_bytes_total{{instance="{instance}"}}[5m]))'
+
+
+def q_node_network_tx(instance: str) -> str:
+    return f'sum(rate(node_network_transmit_bytes_total{{instance="{instance}"}}[5m]))'
+
+
 def load_cluster_locations(path: str | Path) -> dict[str, dict[str, Any]]:
     """加载集群元数据 → {cluster_id: {name, region, location, ...}}。
 

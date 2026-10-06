@@ -75,3 +75,6 @@ HTTP 端点：
   python -m py_compile collector/gpu_collector.py
   ```
 - `backen/`：见 `backen/README.md` 的「验证」段落。
+
+
+avg by(cluster) (1 - (rate(node_cpu_seconds_total{{cluster="{cluster_id}",mode="idle",cpu!=""}}[1m]) + rate(node_cpu_seconds_total{{cluster="{cluster_id}",mode="iowait",cpu!=""}}[1m])))
