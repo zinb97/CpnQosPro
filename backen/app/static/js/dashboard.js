@@ -88,8 +88,100 @@
     });
   }
 
-  // ===== 2. 中国地图（ECharts scatter） =====
+  // ===== 2. 中国地图（ECharts scatter）— 支持点击省份下钻 =====
   let geoMap;
+  let chinaGeoJson = null;   // 缓存 china.json 完整 GeoJSON（用于省下钻）
+  let allClusters = [];       // 缓存 /map 返回的完整集群列表
+  let currentMap = 'china';   // 当前显示层级：'china' 或省份全称（如 "湖南省"）
+
+  // 当前视图可见的集群：中国视图显示全部；省视图按 province 过滤
+  function visibleClusters() {
+    if (currentMap === 'china') return allClusters;
+    return allClusters.filter((c) => c.province === currentMap);
+  }
+
+  function renderMap() {
+    const visible = visibleClusters();
+    const geoBase = {
+      roam: false,
+      itemStyle: { areaColor: '#e2e8f0', borderColor: '#94a3b8', borderWidth: 1 },
+      emphasis: { itemStyle: { areaColor: '#cbd5e1' } },
+      label: { show: false },
+    };
+
+    let geoConfig;
+    if (currentMap === 'china') {
+      geoConfig = { ...geoBase, map: 'china', center: [105, 36], zoom: 1.2 };
+    } else {
+      // 省视图：用省的中心 + 高 zoom
+      const feature = chinaGeoJson.features.find(
+        (f) => f.properties.name === currentMap,
+      );
+      const center = (feature && feature.properties.center) || [105, 36];
+      geoConfig = { ...geoBase, map: currentMap, center, zoom: 4.5 };
+    }
+
+    geoMap.setOption({
+      tooltip: { trigger: 'item' },
+      geo: geoConfig,
+      series: [
+        {
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          data: visible
+            .filter((c) => Array.isArray(c.location) && c.location.length === 2)
+            .map((c) => ({
+              name: c.name,
+              value: [c.location[0], c.location[1], c.online_nodes],
+              status: c.status,
+            })),
+          symbolSize: 25,
+          itemStyle: {
+            color: (p) =>
+              p.data.status === 'healthy'
+                ? '#10b981'
+                : p.data.status === 'warning'
+                  ? '#f59e0b'
+                  : '#94a3b8',
+            shadowBlur: 15,
+          },
+          emphasis: { scale: 1.2 },
+          label: {
+            show: true,
+            position: 'bottom',
+            formatter: '{b}',
+            fontSize: 11,
+            color: '#1e293b',
+          },
+        },
+      ],
+    });
+  }
+
+  function drillDownToProvince(provinceName) {
+    if (!chinaGeoJson) return;
+    const feature = chinaGeoJson.features.find(
+      (f) => f.properties.name === provinceName,
+    );
+    if (!feature) return;
+    // ECharts 子地图注册：把单省 feature 包成 FeatureCollection
+    echarts.registerMap(provinceName, {
+      type: 'FeatureCollection',
+      features: [feature],
+    });
+    currentMap = provinceName;
+    const backBtn = document.getElementById('mapBack');
+    if (backBtn) backBtn.hidden = false;
+    renderMap();
+  }
+
+  function drillUpToChina() {
+    currentMap = 'china';
+    const backBtn = document.getElementById('mapBack');
+    if (backBtn) backBtn.hidden = true;
+    renderMap();
+  }
+
   async function initMap() {
     const el = document.getElementById('geoMap');
     if (!el || typeof echarts === 'undefined') return;
@@ -97,67 +189,39 @@
 
     try {
       const resp = await fetch('/static/data/china.json');
-      const chinaJson = await resp.json();
-      echarts.registerMap('china', chinaJson);
+      chinaGeoJson = await resp.json();
+      echarts.registerMap('china', chinaGeoJson);
     } catch (e) {
       console.error('china.json 加载失败:', e);
+      return;
     }
 
     async function refresh() {
       try {
         const resp = await fetch(el.dataset.endpoint);
         const data = await resp.json();
-        const clusters = data.clusters || [];
-
-        geoMap.setOption({
-          tooltip: { trigger: 'item' },
-          geo: {
-            map: 'china',
-            roam: false,
-            zoom: 1.2,
-            center: [105, 36],
-            itemStyle: { areaColor: '#e2e8f0', borderColor: '#94a3b8', borderWidth: 1 },
-            emphasis: { itemStyle: { areaColor: '#cbd5e1' } },
-            label: { show: false },
-          },
-          series: [
-              {
-                type: 'scatter',
-                coordinateSystem: 'geo',
-                data: clusters
-                  .filter((c) => Array.isArray(c.location) && c.location.length === 2)
-                  .map((c) => ({
-                    name: c.name,
-                    value: [c.location[0], c.location[1], c.online_nodes],
-                    status: c.status,
-                  })),
-                symbolSize: 25,
-                itemStyle: {
-                  color: (p) =>
-                    p.data.status === 'healthy'
-                      ? '#10b981'
-                      : p.data.status === 'warning'
-                        ? '#f59e0b'
-                        : '#94a3b8',
-                  shadowBlur: 15,
-                },
-                emphasis: { scale: 1.2 },
-                label: {
-                  show: true,
-                  position: 'bottom',
-                  formatter: '{b}',
-                  fontSize: 11,
-                  color: '#1e293b',
-                },
-              },
-            ],
-        });
+        allClusters = data.clusters || [];
+        renderMap();
       } catch (e) {
         console.error('地图数据加载失败:', e);
       }
     }
     refresh();
     setInterval(refresh, CHARTS_MS);
+
+    // 点击 geo 区域下钻（仅中国层级、且该省有集群时触发）
+    geoMap.on('click', (params) => {
+      if (params.componentType !== 'geo') return;
+      if (currentMap !== 'china') return;
+      if (!params.name) return;
+      const hasClusters = allClusters.some((c) => c.province === params.name);
+      if (!hasClusters) return;
+      drillDownToProvince(params.name);
+    });
+
+    // 返回全国按钮
+    const backBtn = document.getElementById('mapBack');
+    if (backBtn) backBtn.addEventListener('click', drillUpToChina);
   }
 
   // ===== 3. 带宽趋势（24h） =====

@@ -45,6 +45,7 @@
     </div>
 
     <div class="dashboard__center">
+      <button id="mapBack" class="map-back" hidden type="button">← 返回全国</button>
       <div id="geoMap" data-endpoint="/api/metrics/map"></div>
     </div>
 
@@ -148,10 +149,28 @@
     overflow: hidden;
     background: var(--color-bg-card);
     border: 1px solid var(--color-border);
+    position: relative;
   }
   #geoMap {
     width: 100%;
     height: 100%;
+  }
+  .map-back {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 10;
+    padding: 4px 10px;
+    font-size: 12px;
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-primary);
+    cursor: pointer;
+  }
+  .map-back:hover {
+    background: var(--color-bg-card-hover);
+    border-color: var(--color-accent);
   }
   .dashboard__footer {
     display: flex;
