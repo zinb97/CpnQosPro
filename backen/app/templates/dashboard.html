@@ -22,10 +22,11 @@
         <div class="panel__metrics"
              id="grafanaMetrics"
              data-endpoint="/api/metrics/overview"
-             data-keys='["online_clusters","total_nodes","online_nodes","cpu_cores","memory_total"]'
+             data-keys='["online_clusters","online_nodes","cpu_cores","memory_total"]'
              data-labels='["在线集群数","在线节点数","CPU总核心数","内存总量"]'
              data-icons='["nodes","server","cpu","memory"]'
-             data-colors='["blue","green","yellow","purple"]'>
+             data-colors='["blue","green","yellow","purple"]'
+             data-formats='["plain","combined:total_nodes","plain","plain"]'>
           <div class="loading"><div class="loading__spinner"></div></div>
         </div>
         <div class="panel__charts-grid">
@@ -147,6 +148,10 @@
     overflow: hidden;
     background: var(--color-bg-card);
     border: 1px solid var(--color-border);
+  }
+  #geoMap {
+    width: 100%;
+    height: 100%;
   }
   .dashboard__footer {
     display: flex;

@@ -30,16 +30,31 @@
     return v === null || v === undefined ? '—' : v;
   }
 
+  // 渲染单张指标卡的值文本
+  // format:
+  //   "plain"（默认） — 原样输出 item.value
+  //   "combined:KEY"  — 输出 `${item.value} / ${data[KEY].value}`（用于"在线/总节点数"）
+  function renderMetricValue(item, format, data) {
+    if (item.value === null || item.value === undefined) return '—';
+    if (format && format.startsWith('combined:')) {
+      const secondary = (data[format.slice('combined:'.length)] || {}).value;
+      if (secondary === null || secondary === undefined) return '—';
+      return `${item.value} / ${secondary}`;
+    }
+    return item.value;
+  }
+
   // ===== 1. 指标卡轮询 =====
   function setupMetricCards() {
     document.querySelectorAll('.panel__metrics[data-endpoint]').forEach((el) => {
       const endpoint = el.dataset.endpoint;
-      let keys, labels, icons, colors;
+      let keys, labels, icons, colors, formats;
       try {
         keys = JSON.parse(el.dataset.keys || '[]');
         labels = JSON.parse(el.dataset.labels || '[]');
         icons = JSON.parse(el.dataset.icons || '[]');
         colors = JSON.parse(el.dataset.colors || '[]');
+        formats = JSON.parse(el.dataset.formats || '[]');
       } catch (e) {
         return;
       }
@@ -59,7 +74,7 @@
                   <div class="metric-card__icon metric-card__icon--${colors[i] || 'blue'}">${ICONS[icons[i]] || ''}</div>
                 </div>
                 <div class="metric-card__value${empty ? ' metric-card__value--empty' : ''}">
-                  ${fmt(item.value)}<span class="metric-card__unit">${item.unit || ''}</span>
+                  ${renderMetricValue(item, formats[i], data)}<span class="metric-card__unit">${item.unit || ''}</span>
                 </div>
               </div>`;
             })

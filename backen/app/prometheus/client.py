@@ -38,6 +38,20 @@ class PrometheusClient:
             return []
         return body.get("data", {}).get("result", []) or []
 
+    async def targets(self) -> list[dict[str, Any]]:
+        """获取 Prometheus 当前活跃抓取目标列表。
+
+        等价于 `GET /api/v1/targets`，返回 `data.activeTargets` 数组。
+        每个元素含 `labels`（job/cluster/instance）与 `health`（up/down）。
+        失败或 `status != "success"` 时返回空列表。
+        """
+        r = await self._client.get(f"{self.base_url}/api/v1/targets")
+        r.raise_for_status()
+        body = r.json()
+        if body.get("status") != "success":
+            return []
+        return body.get("data", {}).get("activeTargets", []) or []
+
     async def query_range(
         self,
         promql: str,

@@ -2,17 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 项目概述
+## 项目结构
 
-Linux 系统指标采集器与 Prometheus 导出器。一次遍历读取 `/proc`、`/sys`、`/etc/os-release`，通过 HTTP 暴露为 Prometheus 指标。纯 Python 标准库实现——无任何第三方依赖。
+仓库由两部分组成，**二者相对独立**：
 
-## 运行方式
+| 目录 | 作用 | 依赖 |
+|------|------|------|
+| `collector/` | Linux 主机 + GPU 指标采集，HTTP 暴露为 Prometheus 指标 | 纯标准库 + `pynvml`（**无第三方依赖**） |
+| `backen/` | FastAPI Dashboard，从 Prometheus 拉取指标并渲染 | FastAPI / uvicorn / httpx / jinja2 / pyyaml |
+
+`backen/README.md` 含完整架构、API、环境变量与运行方式——**修改 `backen/` 前先读它**。本文件其余部分主要描述 `collector/`。
+
+---
+
+## collector/ 运行方式
 
 入口为 `collector/metrics_exporter.py`（**不是** `main.py`，那是 PyCharm 自动生成的样板代码）。由于使用了裸导入（`from host_collector import ...`），必须从 `collector/` 目录下启动：
 
 ```bash
 cd collector
 python metrics_exporter.py --port 9100
+nohup python3 metrics_exporter.py > run.log 2>&1 &
 ```
 
 HTTP 端点：
@@ -22,10 +32,10 @@ HTTP 端点：
 
 仓库根目录存在 `.venv`；在 Windows 下通过 `.venv/Scripts/python.exe` 调用（依据 `.claude/settings.local.json`）。
 
-## 代码结构
+## collector/ 代码结构
 
 - `collector/host_collector.py` — `HostCollector` 类。所有的 `_read_*` 方法各自读取一个 procfs/sysfs 数据源；`_collect_all()` 一次性调用它们并将结果存入 `self._data`。提供两种输出方法：`to_json()` 与 `to_prometheus(per_cpu=True)`。
-- `collector/gpu_collector.py` — `GpuCollector` 类，通过 `pynvml` 调用 NVML。采集 `1.txt` 中全部 18 个 `DCGM_FI_DEV_*` 指标。提供 `to_json()` 与 `to_prometheus(**_kwargs)`（忽略多余 kwargs，便于统一调用）。依赖 `pynvml`（硬依赖，无降级）。
+- `collector/gpu_collector.py` — `GpuCollector` 类，通过 `pynvml` 调用 NVML。采集 `references/metrics_extracted.csv` 中全部 18 个 `DCGM_FI_DEV_*` 指标（命名约定参考）。提供 `to_json()` 与 `to_prometheus(**_kwargs)`（忽略多余 kwargs，便于统一调用）。依赖 `pynvml`（硬依赖，无降级）。
 - `collector/metrics_exporter.py` — `MetricsHandler`（`http.server.BaseHTTPRequestHandler` 的子类）与 `MetricsExporter`（封装 `socketserver.TCPServer`）。处理器持有 `collectors` 列表，每次抓取时对每个采集器调用 `to_prometheus(per_cpu=...)` 并拼接输出；`MetricsExporter` 默认同时挂载 `HostCollector` 与 `GpuCollector`。
 
 ## 采集的数据源
@@ -54,17 +64,14 @@ HTTP 端点：
 - 计数器不带 `# HELP` / `# TYPE` 头——由 Prometheus 自动推断类型。
 - `node_uname_info`、`node_os_info`、`node_dmi_info` 的标签集即为原始键值映射（未做归一化）。**未对标签值做引号转义**；若值中包含 `"` 会破坏解析。
 
-## 参考资料
-
-- `1.txt` — DCGM GPU exporter 输出样例（`DCGM_FI_DEV_*` 指标）。可能作为命名/标签约定的参考保留；并非本代码生成。
-
 ## 验证
 
-对任一模块做语法检查：
+仓库中**无测试、无 linter 配置**。
 
-```bash
-python -m py_compile collector/host_collector.py
-python -m py_compile collector/metrics_exporter.py
-```
-
-仓库中无测试、无 linter 配置、无 `requirements.txt`。
+- `collector/`：
+  ```bash
+  python -m py_compile collector/host_collector.py
+  python -m py_compile collector/metrics_exporter.py
+  python -m py_compile collector/gpu_collector.py
+  ```
+- `backen/`：见 `backen/README.md` 的「验证」段落。

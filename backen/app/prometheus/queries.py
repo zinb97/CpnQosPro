@@ -8,9 +8,8 @@ import yaml
 
 
 # ===== Dashboard 9 个指标卡 =====
-Q_ONLINE_CLUSTERS = "count(count by(cluster) (up{job=~\"node-.*\"}))"
-Q_TOTAL_NODES = "count(count by(instance) (up{job=~\"node-.*\"}))"
-Q_ONLINE_NODES = "count( up{job=~\"node-.*\"} == 1 )"
+# 集群数 / 总节点数 / 在线节点数 由 `/api/v1/targets` 推导（PrometheusClient.targets），
+# 不再用 PromQL（up{job=~"node-.*"} 系列）。
 Q_CPU_CORES = "count(node_cpu_seconds_total{mode='system'})"
 Q_MEMORY_TOTAL = "sum(node_memory_MemTotal_bytes{})"
 Q_SWITCHES = "qos_switches_count"
@@ -20,8 +19,8 @@ Q_PACKET_IN = "SUM(qos_switch_packet_in_total)"
 
 
 # ===== 地图数据 =====
-# 各集群当前在线节点数（用于地图散点的 value）
-Q_CLUSTERS_UP = "count by(cluster) (up{job=~\"node-.*\"} == 1)"
+# 各集群在线节点数与集群列表均由 /api/v1/targets 推导（PrometheusClient.targets），
+# 不再用 PromQL（up{job=~"node-.*"} 系列）。
 # 各集群总算力（占位：实际 PromQL 需 collector 暴露 qos_cluster_total_flops 之类指标）
 Q_CLUSTERS_FLOPS = "sum by(cluster) (qos_cluster_total_flops)"
 Q_CLUSTERS_USED_FLOPS = "sum by(cluster) (qos_cluster_used_flops)"

@@ -16,20 +16,16 @@ from fastapi.responses import JSONResponse
 from app.prometheus.client import PrometheusClient
 from app.prometheus.queries import (
     Q_BANDWIDTH_RANGE,
-    Q_CLUSTERS_UP,
     Q_CPU_CORES,
     Q_EVENTS,
     Q_HOSTS,
     Q_LINKS,
     Q_LINKS_QUALITY,
     Q_MEMORY_TOTAL,
-    Q_ONLINE_CLUSTERS,
-    Q_ONLINE_NODES,
     Q_PACKET_IN,
     Q_POLICIES,
     Q_SLICES,
     Q_SWITCHES,
-    Q_TOTAL_NODES,
 )
 
 
@@ -81,20 +77,45 @@ async def _safe_query(request: Request, promql: str) -> list[dict[str, Any]]:
         return []
 
 
+def _summarize_targets(targets: list[dict[str, Any]]) -> tuple[int, int, int]:
+    """从 `/api/v1/targets` 结果推导 (集群数, 总节点数, 在线节点数)。
+
+    只统计 `labels.job` 以 `node-` 开头的目标（节点 exporter 抓取任务）；
+    基础设施 job（prometheus、ryu-controller 等）自动排除。
+    集群数取 `labels.cluster` 的 distinct 数。
+    """
+    clusters: set[str] = set()
+    total = 0
+    online = 0
+    for t in targets:
+        labels = t.get("labels") or {}
+        if not (labels.get("job") or "").startswith("node-"):
+            continue
+        cluster_id = labels.get("cluster", "")
+        if cluster_id:
+            clusters.add(cluster_id)
+        total += 1
+        if t.get("health") == "up":
+            online += 1
+    return len(clusters), total, online
+
+
 # ===== Endpoints =====
 
 
 @router.get("/overview")
 async def overview(request: Request) -> JSONResponse:
-    """8 个 Dashboard 指标卡聚合查询。"""
+    """8 个 Dashboard 指标卡聚合查询。
+
+    集群数 / 总节点数 / 在线节点数由 `/api/v1/targets` 推导；
+    其余 6 个指标走 PromQL。
+    """
     cli = _client(request)
 
-    # 并发抓 9 条指标（cards 列表包含 packet-in）
+    # 并发：1 个 /targets + 6 条 PromQL
     import asyncio
     results = await asyncio.gather(
-        cli.query(Q_ONLINE_CLUSTERS),
-        cli.query(Q_TOTAL_NODES),
-        cli.query(Q_ONLINE_NODES),
+        cli.targets(),
         cli.query(Q_CPU_CORES),
         cli.query(Q_MEMORY_TOTAL),
         cli.query(Q_SWITCHES),
@@ -103,8 +124,13 @@ async def overview(request: Request) -> JSONResponse:
         cli.query(Q_PACKET_IN),
         return_exceptions=True,
     )
-    # 任一异常都视为 Prometheus 不可用（取最后一次 health 决定）
     prom_ok = not any(isinstance(r, Exception) for r in results)
+
+    targets_data = results[0]
+    if isinstance(targets_data, list):
+        online_clusters, total_nodes, online_nodes = _summarize_targets(targets_data)
+    else:
+        online_clusters = total_nodes = online_nodes = None
 
     def _scalar_safe(idx: int) -> float | None:
         r = results[idx]
@@ -112,15 +138,15 @@ async def overview(request: Request) -> JSONResponse:
 
     payload = {
         "prom_ok": prom_ok,
-        "online_clusters": metric_card(_scalar_safe(0), "个"),
-        "total_nodes": metric_card(_scalar_safe(1), "个"),
-        "online_nodes": metric_card(_scalar_safe(2), "个"),
-        "cpu_cores": metric_card(_scalar_safe(3), "核"),
-        "memory_total": metric_card(_scalar_safe(4), "TB"),
-        "switches": metric_card(_scalar_safe(5), "个"),
-        "links": metric_card(_scalar_safe(6), "条"),
-        "hosts": metric_card(_scalar_safe(7), "个"),
-        "packet_in": metric_card(_scalar_safe(8), "次"),
+        "online_clusters": metric_card(online_clusters, "个"),
+        "total_nodes": metric_card(total_nodes, "个"),
+        "online_nodes": metric_card(online_nodes, "个"),
+        "cpu_cores": metric_card(_scalar_safe(1), "核"),
+        "memory_total": metric_card(_scalar_safe(2), "TB"),
+        "switches": metric_card(_scalar_safe(3), "个"),
+        "links": metric_card(_scalar_safe(4), "条"),
+        "hosts": metric_card(_scalar_safe(5), "个"),
+        "packet_in": metric_card(_scalar_safe(6), "次"),
     }
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
 
@@ -156,31 +182,39 @@ async def bandwidth(request: Request) -> JSONResponse:
 
 @router.get("/map")
 async def map_data(request: Request) -> JSONResponse:
-    """地图数据：集群散点 + 集群间链路。"""
+    """地图数据：集群散点 + 集群间链路。
+
+    集群列表与在线节点数均从 `/api/v1/targets` 推导：
+    - 集群枚举：distinct `labels.cluster`（仅统计 `job` 以 `node-` 开头的目标）
+    - 在线节点数：每个集群下 `health == "up"` 的目标数
+    - 名称/区域/经纬度：从 `cluster_locations.yaml` 按 `cluster.id` 匹配查表
+    """
     cli = _client(request)
     cluster_meta: dict[str, dict[str, Any]] = request.app.state.cluster_meta
 
-    # 拉取各集群在线节点数
+    # 1. 从 /api/v1/targets 聚合：cluster → 在线节点数 + 集群集合
     try:
-        up_results = await cli.query(Q_CLUSTERS_UP)
+        targets = await cli.targets()
     except Exception:
-        up_results = []
+        targets = []
 
-    # 聚合 cluster → 在线节点数
     online_by_cluster: dict[str, int] = {}
-    for r in up_results:
-        labels = r.get("metric", {})
-        cluster_id = labels.get("cluster")
-        if not cluster_id:
+    cluster_ids: set[str] = set()
+    for t in targets:
+        labels = t.get("labels") or {}
+        if not (labels.get("job") or "").startswith("node-"):
             continue
-        try:
-            online_by_cluster[cluster_id] = int(float(r["value"][1]))
-        except (KeyError, ValueError, TypeError):
+        cid = labels.get("cluster", "")
+        if not cid:
             continue
+        cluster_ids.add(cid)
+        if t.get("health") == "up":
+            online_by_cluster[cid] = online_by_cluster.get(cid, 0) + 1
 
-    # 合并元数据（经纬度）→ 前端可直接渲染
+    # 2. 合并 yaml 元数据 → 前端可直接渲染
     clusters: list[dict[str, Any]] = []
-    for cid, meta in cluster_meta.items():
+    for cid in cluster_ids:
+        meta = cluster_meta.get(cid, {})
         online = online_by_cluster.get(cid, 0)
         status = "healthy" if online > 0 else "offline"
         clusters.append({
@@ -192,11 +226,17 @@ async def map_data(request: Request) -> JSONResponse:
             "status": status,
         })
 
-    # 兜底：Prometheus 不可达时仍展示元数据（用于地图基本形状）
-    if not online_by_cluster and cluster_meta:
-        for c in clusters:
-            c["online_nodes"] = 0
-            c["status"] = "unknown"
+    # 兜底：targets 不可达时仍展示 yaml 中的元数据（地图基本形状）
+    if not cluster_ids and cluster_meta:
+        for cid, meta in cluster_meta.items():
+            clusters.append({
+                "id": cid,
+                "name": meta.get("name", cid),
+                "region": meta.get("region", ""),
+                "location": meta.get("location", [0, 0]),
+                "online_nodes": 0,
+                "status": "unknown",
+            })
 
     return cache_response(
         {"clusters": clusters, "links": []},
