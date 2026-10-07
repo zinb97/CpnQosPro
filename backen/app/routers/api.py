@@ -29,6 +29,9 @@ from app.prometheus.queries import (
     Q_SWITCHES,
     q_cluster_cpu_cores,
     q_cluster_cpu_usage,
+    q_cluster_gpu_count,
+    q_cluster_gpu_temp,
+    q_cluster_gpu_util,
     q_cluster_load,
     q_cluster_max_temp,
     q_cluster_mem_total,
@@ -36,6 +39,10 @@ from app.prometheus.queries import (
     q_node_boot_time,
     q_node_cpu_usage,
     q_node_disk_total,
+    q_node_gpu_count,
+    q_node_gpu_mem_used,
+    q_node_gpu_temp,
+    q_node_gpu_util,
     q_node_load1,
     q_node_max_temp,
     q_node_mem_avail,
@@ -394,6 +401,9 @@ async def clusters(request: Request) -> JSONResponse:
                 _safe_query(request, q_cluster_cpu_cores(cid)),
                 _safe_query(request, q_cluster_mem_total(cid)),
                 _safe_query(request, q_cluster_max_temp(cid)),
+                _safe_query(request, q_cluster_gpu_count(cid)),
+                _safe_query(request, q_cluster_gpu_util(cid)),
+                _safe_query(request, q_cluster_gpu_temp(cid)),
                 return_exceptions=True,
             )
             for cid in cids
@@ -426,6 +436,9 @@ async def clusters(request: Request) -> JSONResponse:
         cpu_cores = _first_scalar(row, 3)
         mem_total = _first_scalar(row, 4)
         max_temp = _first_scalar(row, 5)
+        gpu_count = _first_scalar(row, 6)
+        gpu_util = _first_scalar(row, 7)
+        gpu_temp = _first_scalar(row, 8)
 
         items.append({
             "id": cid,
@@ -442,6 +455,9 @@ async def clusters(request: Request) -> JSONResponse:
             "cpu_cores": int(cpu_cores) if cpu_cores is not None else None,
             "mem_total_bytes": int(mem_total) if mem_total is not None else None,
             "max_temp_c": _round(max_temp, 1),
+            "gpu_count": int(gpu_count) if gpu_count is not None else 0,
+            "gpu_util": _round(gpu_util, 1),
+            "gpu_max_temp_c": _round(gpu_temp, 1),
         })
 
     return cache_response({"items": items}, max_age=request.app.state.settings.cards_cache_s)
@@ -478,15 +494,18 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
         _safe_query(request, q_cluster_cpu_cores(cluster_id)),
         _safe_query(request, q_cluster_mem_total(cluster_id)),
         _safe_query(request, q_cluster_max_temp(cluster_id)),
+        _safe_query(request, q_cluster_gpu_count(cluster_id)),
+        _safe_query(request, q_cluster_gpu_util(cluster_id)),
+        _safe_query(request, q_cluster_gpu_temp(cluster_id)),
         return_exceptions=True,
     )
 
-    # 每节点指标：6 个 PromQL × N 节点 → asyncio.gather 二维并发
+    # 每节点指标：10 个 PromQL × N 节点 → asyncio.gather 二维并发
     node_query_jobs = []
     for n in cluster_nodes:
         inst = n["instance"]
         if not inst:
-            node_query_jobs.append(asyncio.gather(*(asyncio.sleep(0) for _ in range(6)), return_exceptions=True))
+            node_query_jobs.append(asyncio.gather(*(asyncio.sleep(0) for _ in range(10)), return_exceptions=True))
             continue
         node_query_jobs.append(asyncio.gather(
             _safe_query(request, q_node_cpu_usage(inst)),
@@ -495,6 +514,10 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
             _safe_query(request, q_node_mem_avail(inst)),
             _safe_query(request, q_node_max_temp(inst)),
             _safe_query(request, q_node_procs_running(inst)),
+            _safe_query(request, q_node_gpu_count(inst)),
+            _safe_query(request, q_node_gpu_util(inst)),
+            _safe_query(request, q_node_gpu_temp(inst)),
+            _safe_query(request, q_node_gpu_mem_used(inst)),
             return_exceptions=True,
         ))
     per_node_results = await asyncio.gather(*node_query_jobs, return_exceptions=True)
@@ -511,6 +534,10 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
         mem_avail = _first_scalar(nr, 3)
         max_temp = _first_scalar(nr, 4)
         procs = _first_scalar(nr, 5)
+        gpu_count = _first_scalar(nr, 6)
+        gpu_util = _first_scalar(nr, 7)
+        gpu_temp = _first_scalar(nr, 8)
+        gpu_mem_used = _first_scalar(nr, 9)
         mem_usage = (
             (mem_total - mem_avail) / mem_total if (mem_total and mem_avail is not None and mem_total > 0) else None
         )
@@ -523,6 +550,10 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
             "mem_usage": _round_pct(mem_usage),
             "max_temp_c": _round(max_temp, 1),
             "procs_running": int(procs) if procs is not None else None,
+            "gpu_count": int(gpu_count) if gpu_count is not None else 0,
+            "gpu_util": _round(gpu_util, 1),
+            "gpu_max_temp_c": _round(gpu_temp, 1),
+            "gpu_mem_used_mib": _round(gpu_mem_used, 0),
         })
         nodes_out.append(n_out)
 
@@ -551,9 +582,103 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
         "cpu_cores": int(_agg(3)) if _agg(3) is not None else None,
         "mem_total_bytes": int(_agg(4)) if _agg(4) is not None else None,
         "max_temp_c": _round(_agg(5), 1),
+        "gpu_count": int(_agg(6)) if _agg(6) is not None else 0,
+        "gpu_util": _round(_agg(7), 1),
+        "gpu_max_temp_c": _round(_agg(8), 1),
         "nodes": nodes_out,
     }
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
+
+
+@router.get("/hosts/{instance:path}/timeseries")
+async def host_timeseries(instance: str, request: Request) -> JSONResponse:
+    """主机实时指标时序（30m 窗口，30s 步进）。
+
+    返回 11 个序列：cpu_usage / mem_usage / load1 / max_temp_c / procs_running /
+    disk_io / net_rx / net_tx / gpu_util / gpu_max_temp_c / gpu_mem_used。
+    每个序列均为 {time, value}[]，time 为 HH:MM:SS 字符串。
+
+    同一指标可能按 cpu/gpu/disk/iface 分裂为多条 series（Prometheus 默认行为）；
+    这里按时间戳对齐并按 metric 指定的聚合方式（avg/max/sum）合并为一个序列。
+
+    注意：本端点必须在 `/hosts/{instance:path}` 之前注册——FastAPI 按声明顺序匹配，
+    否则 `:path` 贪婪匹配会把 `/timeseries` 一并吞进 instance。
+    """
+    cli = _client(request)
+    end = datetime.now()
+    start = end - timedelta(minutes=30)
+
+    # (name, promql, 聚合方式)
+    # avg : 多核/多卡/多温度区取平均
+    # max : 最高温度类
+    # sum : 磁盘 IO、显存已用（多卡/多盘累加）
+    # last: 单 series 指标（load1/mem_total/procs_running）
+    metric_specs: list[tuple[str, str, str]] = [
+        ("cpu_usage",      q_node_cpu_usage(instance),       "avg"),
+        ("mem_usage", (
+            f'1 - node_memory_MemAvailable_bytes{{instance="{instance}"}}'
+            f' / node_memory_MemTotal_bytes{{instance="{instance}"}}'
+        ),                                                                          "last"),
+        ("load1",          q_node_load1(instance),            "last"),
+        ("max_temp_c",     q_node_max_temp(instance),         "max"),
+        ("procs_running",  q_node_procs_running(instance),    "last"),
+        ("disk_io",        q_node_disk_total(instance),       "sum"),
+        ("net_rx",         q_node_network_rx(instance),       "sum"),
+        ("net_tx",         q_node_network_tx(instance),       "sum"),
+        ("gpu_util",       q_node_gpu_util(instance),         "avg"),
+        ("gpu_max_temp_c", q_node_gpu_temp(instance),         "max"),
+        ("gpu_mem_used",   q_node_gpu_mem_used(instance),     "sum"),
+    ]
+
+    raw = await asyncio.gather(
+        *(cli.query_range(pql, start, end, step="30s") for _, pql, _ in metric_specs),
+        return_exceptions=True,
+    )
+
+    def _agg_series(result: Any, mode: str) -> list[dict[str, float | str]]:
+        """把多条 series 合并为单条：按 ts 对齐，按 mode 聚合。"""
+        if not isinstance(result, list) or not result:
+            return []
+        bucket: dict[float, list[float]] = {}
+        ts_set: set[float] = set()
+        for series in result:
+            for ts, v in series.get("values", []):
+                try:
+                    fts = float(ts)
+                    fv = float(v)
+                except (ValueError, TypeError):
+                    continue
+                bucket.setdefault(fts, []).append(fv)
+                ts_set.add(fts)
+        if not ts_set:
+            return []
+        out: list[dict[str, float | str]] = []
+        for fts in sorted(ts_set):
+            vals = bucket[fts]
+            if not vals:
+                continue
+            if mode == "avg":
+                v = sum(vals) / len(vals)
+            elif mode == "max":
+                v = max(vals)
+            elif mode == "sum":
+                v = sum(vals)
+            else:  # last
+                v = vals[-1]
+            out.append({
+                "time": datetime.fromtimestamp(fts).strftime("%H:%M:%S"),
+                "value": v,
+            })
+        return out
+
+    series = {
+        name: _agg_series(r, mode)
+        for (name, _, mode), r in zip(metric_specs, raw)
+    }
+    return cache_response(
+        {"instance": instance, "series": series},
+        max_age=request.app.state.settings.charts_cache_s,
+    )
 
 
 @router.get("/hosts/{instance:path}")
@@ -583,11 +708,12 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
     cid = labels.get("cluster", "")
     cluster = cluster_meta.get(cid, {})
 
-    # 并发查询：8 类指标 + 3 个元指标
+    # 并发查询：8 类指标 + 3 个元指标 + 4 个 GPU 指标
     (
         cpu, load1, mem_total, mem_avail, max_temp, procs,
         boot_time, disk_io, net_rx, net_tx,
         uname_info, os_info, dmi_info,
+        gpu_count, gpu_util, gpu_temp, gpu_mem_used,
     ) = await asyncio.gather(
         _safe_query(request, q_node_cpu_usage(instance)),
         _safe_query(request, q_node_load1(instance)),
@@ -602,6 +728,10 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         _safe_query(request, f'node_uname_info{{instance="{instance}"}}'),
         _safe_query(request, f'node_os_info{{instance="{instance}"}}'),
         _safe_query(request, f'node_dmi_info{{instance="{instance}"}}'),
+        _safe_query(request, q_node_gpu_count(instance)),
+        _safe_query(request, q_node_gpu_util(instance)),
+        _safe_query(request, q_node_gpu_temp(instance)),
+        _safe_query(request, q_node_gpu_mem_used(instance)),
         return_exceptions=True,
     )
 
@@ -645,6 +775,12 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         "disk_io_bytes_per_sec": _round(_q(disk_io), 0),
         "net_rx_bytes_per_sec": _round(_q(net_rx), 0),
         "net_tx_bytes_per_sec": _round(_q(net_tx), 0),
+
+        # GPU
+        "gpu_count": int(_q(gpu_count)) if _q(gpu_count) is not None else 0,
+        "gpu_util": _round(_q(gpu_util), 1),
+        "gpu_max_temp_c": _round(_q(gpu_temp), 1),
+        "gpu_mem_used_mib": _round(_q(gpu_mem_used), 0),
 
         # 系统信息
         "uname": _info(uname_info),

@@ -69,10 +69,11 @@
             <th>负载</th>
             <th>温度</th>
             <th>进程数</th>
+            <th>GPU</th>
             <th>最近抓取</th>
           </tr>
         </thead>
-        <tbody><tr><td colspan="8" class="nodes-table__empty">加载中...</td></tr></tbody>
+        <tbody><tr><td colspan="9" class="nodes-table__empty">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -199,13 +200,16 @@
   function render(nodes) {
     const tbody = document.querySelector('#nodesTable tbody');
     if (!nodes || !nodes.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="nodes-table__empty">该集群下暂无节点</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="nodes-table__empty">该集群下暂无节点</td></tr>';
       return;
     }
     tbody.innerHTML = nodes.map((n) => {
       const health = n.health || 'unknown';
       const memWidth = n.mem_usage != null ? Math.min(100, n.mem_usage) : 0;
       const addr = (n.instance || '—').replace(/:\d+$/, '');
+      const gpuCell = n.gpu_count > 0
+        ? `<strong>${n.gpu_count}</strong> 卡<br><span style="font-size:10px;color:var(--color-text-muted);">${n.gpu_util == null ? '—' : n.gpu_util.toFixed(0) + '%'}${n.gpu_max_temp_c != null ? ' · ' + n.gpu_max_temp_c.toFixed(0) + '°C' : ''}</span>`
+        : '<span style="color:var(--color-text-muted);">—</span>';
       return `<tr data-instance="${n.instance}">
         <td>${addr}</td>
         <td><span class="status ${STATUS_CLASS[health] || 'status--offline'}">${STATUS_LABEL[health] || health}</span></td>
@@ -220,6 +224,7 @@
         <td>${n.load1 == null ? '—' : n.load1.toFixed(2)}</td>
         <td>${n.max_temp_c == null ? '—' : n.max_temp_c.toFixed(1) + '°C'}</td>
         <td>${n.procs_running ?? '—'}</td>
+        <td>${gpuCell}</td>
         <td style="font-size:11px;color:var(--color-text-secondary);">${fmtTime(n.last_scrape)}</td>
       </tr>`;
     }).join('');

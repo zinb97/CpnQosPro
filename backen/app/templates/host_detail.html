@@ -6,46 +6,18 @@
     <div>
       <a id="backLink" href="/resource/clusters" class="back-link">← 返回集群列表</a>
       <h1 class="resource-page__title" id="hostTitle">{{ instance }}</h1>
-      <p class="resource-page__subtitle">资源管控中心 / 主机详情</p>
+      <p class="resource-page__subtitle">资源管控中心 / 主机详情 · 时序窗口 30 分钟</p>
     </div>
     <span class="status status--offline" id="hostStatus" hidden></span>
   </div>
 
-  <div class="host-detail__metrics">
+  <div class="host-detail__top">
     <div class="metric-card">
       <div class="metric-card__header">
-        <span class="metric-card__label">CPU 使用率</span>
+        <span class="metric-card__label">GPU 卡数</span>
         <div class="metric-card__icon metric-card__icon--blue">●</div>
       </div>
-      <div class="metric-card__value" id="mCpu">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-card__header">
-        <span class="metric-card__label">内存使用率</span>
-        <div class="metric-card__icon metric-card__icon--purple">●</div>
-      </div>
-      <div class="metric-card__value" id="mMem">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-card__header">
-        <span class="metric-card__label">负载 (1m)</span>
-        <div class="metric-card__icon metric-card__icon--green">●</div>
-      </div>
-      <div class="metric-card__value" id="mLoad">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-card__header">
-        <span class="metric-card__label">最高温度</span>
-        <div class="metric-card__icon metric-card__icon--red">●</div>
-      </div>
-      <div class="metric-card__value" id="mTemp">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-card__header">
-        <span class="metric-card__label">运行进程</span>
-        <div class="metric-card__icon metric-card__icon--yellow">●</div>
-      </div>
-      <div class="metric-card__value" id="mProcs">—</div>
+      <div class="metric-card__value" id="mGpuCount">—</div>
     </div>
     <div class="metric-card">
       <div class="metric-card__header">
@@ -56,17 +28,60 @@
     </div>
     <div class="metric-card">
       <div class="metric-card__header">
-        <span class="metric-card__label">磁盘 IO</span>
+        <span class="metric-card__label">运行进程</span>
         <div class="metric-card__icon metric-card__icon--yellow">●</div>
       </div>
-      <div class="metric-card__value" id="mDisk">—</div>
+      <div class="metric-card__value" id="mProcs">—</div>
     </div>
     <div class="metric-card">
       <div class="metric-card__header">
-        <span class="metric-card__label">网络吞吐</span>
+        <span class="metric-card__label">网络吞吐（当前）</span>
         <div class="metric-card__icon metric-card__icon--green">●</div>
       </div>
       <div class="metric-card__value" id="mNet" style="font-size:14px;">—</div>
+    </div>
+  </div>
+
+  <div class="host-detail__charts">
+    <div class="chart-card">
+      <div class="chart-card__title">CPU 使用率</div>
+      <div id="chartCpu" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">内存使用率</div>
+      <div id="chartMem" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">负载 (1m)</div>
+      <div id="chartLoad" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">CPU 最高温度</div>
+      <div id="chartTemp" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">磁盘 IO</div>
+      <div id="chartDisk" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">网络下行</div>
+      <div id="chartNetRx" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">网络上行</div>
+      <div id="chartNetTx" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">GPU 平均利用率</div>
+      <div id="chartGpuUtil" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">GPU 最高温度</div>
+      <div id="chartGpuTemp" class="chart-card__chart"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card__title">GPU 显存占用</div>
+      <div id="chartGpuMem" class="chart-card__chart"></div>
     </div>
   </div>
 
@@ -104,9 +119,9 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    gap: 16px;
+    gap: 12px;
     padding: 16px;
-    overflow: hidden;
+    overflow: auto;
   }
   .resource-page__header {
     display: flex;
@@ -132,21 +147,42 @@
     text-decoration: none;
   }
   .back-link:hover { color: var(--color-accent); }
-  .host-detail__metrics {
+  .host-detail__top {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     flex-shrink: 0;
   }
+  .host-detail__charts {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .chart-card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 140px;
+  }
+  .chart-card__title {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .chart-card__chart {
+    flex: 1;
+    min-height: 100px;
+    width: 100%;
+  }
   .host-detail__panels {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
-    flex: 1;
-    min-height: 0;
-  }
-  .host-detail__panels .panel {
-    overflow-y: auto;
   }
   .host-info {
     display: grid;
@@ -180,6 +216,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js" crossorigin="anonymous"></script>
 <script>
   const INSTANCE = {{ instance | tojson }};
   const STATUS_LABEL = { healthy: '运行中', warning: '部分离线', offline: '离线', unknown: '未知' };
@@ -207,65 +244,197 @@
       return `${d.toLocaleString('zh-CN', { hour12: false })} (已运行 ${days} 天)`;
     } catch { return ts; }
   }
-  function pct(v) { return v == null ? '—' : v.toFixed(1) + '%'; }
   function setText(id, val) {
     const el = document.getElementById(id);
     if (el) el.textContent = val == null || val === '' ? '—' : val;
   }
 
-  async function refresh() {
+  // ===== 折线图 =====
+  // 通用配置：共享 xAxis（time），yAxis 按 metric 类型
+  const COLORS = {
+    blue: '#0ea5e9', purple: '#8b5cf6', green: '#10b981',
+    yellow: '#f59e0b', red: '#ef4444',
+  };
+  const CHARTS = {};   // id -> echarts instance
+
+  function baseOption(color) {
+    return {
+      animation: false,
+      grid: { left: 44, right: 12, top: 6, bottom: 18 },
+      tooltip: { trigger: 'axis', transitionDuration: 0 },
+      xAxis: {
+        type: 'category',
+        data: [],
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: '#e2e8f0' } },
+        axisLabel: { fontSize: 9, color: '#94a3b8', show: false },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { fontSize: 9, color: '#94a3b8' },
+        splitLine: { lineStyle: { color: '#e2e8f0' } },
+        scale: true,
+      },
+      series: [{
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        data: [],
+        lineStyle: { color, width: 2 },
+        itemStyle: { color },
+        areaStyle: {
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: color + '40' },
+              { offset: 1, color: color + '00' },
+            ],
+          },
+        },
+      }],
+    };
+  }
+
+  function fmtPercent(v) { return v == null ? '—' : v.toFixed(1) + '%'; }
+  function fmtFloat(v) { return v == null ? '—' : v.toFixed(2); }
+  function fmtTemp(v) { return v == null ? '—' : v.toFixed(1) + '°C'; }
+  function fmtBytesChart(v) { return v == null ? '—' : fmtBytes(v) + '/s'; }
+  function fmtMib(v) { return v == null ? '—' : v.toFixed(0) + ' MiB'; }
+
+  function makeChart(id, color, fmtValue, yFormatter) {
+    const el = document.getElementById(id);
+    if (!el || typeof echarts === 'undefined') return null;
+    const chart = echarts.init(el);
+    const opt = baseOption(color);
+    if (yFormatter) opt.tooltip.valueFormatter = yFormatter;
+    chart.setOption(opt);
+    CHARTS[id] = chart;
+    return chart;
+  }
+
+  function updateChart(id, points) {
+    const chart = CHARTS[id];
+    if (!chart) return;
+    chart.setOption({
+      xAxis: { data: points.map((p) => p.time) },
+      series: [{ data: points.map((p) => p.value) }],
+    });
+  }
+
+  // 初始化 10 个图表
+  makeChart('chartCpu',     COLORS.blue,   fmtPercent, fmtPercent);
+  makeChart('chartMem',     COLORS.purple, fmtPercent, fmtPercent);
+  makeChart('chartLoad',    COLORS.green,  fmtFloat,   fmtFloat);
+  makeChart('chartTemp',    COLORS.red,    fmtTemp,    fmtTemp);
+  makeChart('chartDisk',    COLORS.yellow, fmtBytesChart, fmtBytesChart);
+  makeChart('chartNetRx',   COLORS.green,  fmtBytesChart, fmtBytesChart);
+  makeChart('chartNetTx',   COLORS.blue,   fmtBytesChart, fmtBytesChart);
+  makeChart('chartGpuUtil', COLORS.purple, fmtPercent, fmtPercent);
+  makeChart('chartGpuTemp', COLORS.red,    fmtTemp,    fmtTemp);
+  makeChart('chartGpuMem',  COLORS.yellow, fmtMib,     fmtMib);
+
+  function resizeAll() {
+    Object.values(CHARTS).forEach((c) => c.resize());
+  }
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resizeAll, 100);
+  });
+
+  // ===== 数据拉取 =====
+  async function fetchDetail() {
+    const r = await fetch('/api/metrics/hosts/' + encodeURIComponent(INSTANCE));
+    if (r.status === 404) {
+      document.getElementById('hostTitle').textContent = '主机不存在';
+      return null;
+    }
+    return await r.json();
+  }
+
+  async function fetchTimeseries() {
     try {
-      const r = await fetch('/api/metrics/hosts/' + encodeURIComponent(INSTANCE));
-      if (r.status === 404) {
-        document.getElementById('hostTitle').textContent = '主机不存在';
-        return;
-      }
-      const d = await r.json();
-      document.getElementById('hostTitle').textContent = (d.instance || '').replace(/:\d+$/, '');
-      setText('mCpu', pct(d.cpu_usage));
-      setText('mMem', pct(d.mem_usage));
-      setText('mLoad', d.load1 == null ? '—' : d.load1.toFixed(2));
-      setText('mTemp', d.max_temp_c == null ? '—' : d.max_temp_c.toFixed(1) + '°C');
-      setText('mProcs', d.procs_running);
-      setText('mMemTot', fmtBytes(d.mem_total_bytes));
-      setText('mDisk', fmtBytesPerSec(d.disk_io_bytes_per_sec));
-      setText('mNet', `↑ ${fmtBytesPerSec(d.net_tx_bytes_per_sec)}\n↓ ${fmtBytesPerSec(d.net_rx_bytes_per_sec)}`);
+      const r = await fetch('/api/metrics/hosts/' + encodeURIComponent(INSTANCE) + '/timeseries');
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (e) {
+      return null;
+    }
+  }
 
-      setText('iCluster', d.cluster_name || d.cluster_id || '—');
-      setText('iJob', d.job);
-      setText('iRegion', d.region || '—');
-      setText('iProvince', d.province || '—');
-      setText('iScrape', fmtTime(d.last_scrape));
-      setText('iError', d.last_error || '无');
-      setText('iBoot', fmtBoot(d.boot_time));
+  function renderDetail(d) {
+    document.getElementById('hostTitle').textContent = (d.instance || '').replace(/:\d+$/, '');
+    setText('mGpuCount', d.gpu_count > 0 ? d.gpu_count + ' 卡' : '—');
+    setText('mMemTot', fmtBytes(d.mem_total_bytes));
+    setText('mProcs', d.procs_running);
+    setText('mNet', `↑ ${fmtBytesPerSec(d.net_tx_bytes_per_sec)}\n↓ ${fmtBytesPerSec(d.net_rx_bytes_per_sec)}`);
 
-      const u = d.uname || {};
-      const o = d.os || {};
-      const m = d.dmi || {};
-      setText('iPrettyName', o.pretty_name || o.name || '—');
-      setText('iKernel', u.release || '—');
-      setText('iArch', u.machine || '—');
-      setText('iProduct', m.product_name || '—');
-      setText('iVendor', m.system_vendor || '—');
-      setText('iBios', m.bios_version || '—');
+    setText('iCluster', d.cluster_name || d.cluster_id || '—');
+    setText('iJob', d.job);
+    setText('iRegion', d.region || '—');
+    setText('iProvince', d.province || '—');
+    setText('iScrape', fmtTime(d.last_scrape));
+    setText('iError', d.last_error || '无');
+    setText('iBoot', fmtBoot(d.boot_time));
 
-      const status = d.health || 'unknown';
-      const badge = document.getElementById('hostStatus');
-      badge.hidden = false;
-      badge.className = 'status ' + (STATUS_CLASS[status] || 'status--offline');
-      badge.textContent = STATUS_LABEL[status] || status;
+    const u = d.uname || {};
+    const o = d.os || {};
+    const m = d.dmi || {};
+    setText('iPrettyName', o.pretty_name || o.name || '—');
+    setText('iKernel', u.release || '—');
+    setText('iArch', u.machine || '—');
+    setText('iProduct', m.product_name || '—');
+    setText('iVendor', m.system_vendor || '—');
+    setText('iBios', m.bios_version || '—');
 
-      if (d.cluster_id) {
-        const back = document.getElementById('backLink');
-        back.href = '/resource/clusters/' + encodeURIComponent(d.cluster_id);
-        back.textContent = '← 返回集群 ' + (d.cluster_name || d.cluster_id);
-      }
+    const status = d.health || 'unknown';
+    const badge = document.getElementById('hostStatus');
+    badge.hidden = false;
+    badge.className = 'status ' + (STATUS_CLASS[status] || 'status--offline');
+    badge.textContent = STATUS_LABEL[status] || status;
+
+    if (d.cluster_id) {
+      const back = document.getElementById('backLink');
+      back.href = '/resource/clusters/' + encodeURIComponent(d.cluster_id);
+      back.textContent = '← 返回集群 ' + (d.cluster_name || d.cluster_id);
+    }
+  }
+
+  function renderTimeseries(ts) {
+    if (!ts || !ts.series) return;
+    const s = ts.series;
+    updateChart('chartCpu',     s.cpu_usage || []);
+    updateChart('chartMem',     s.mem_usage || []);
+    updateChart('chartLoad',    s.load1 || []);
+    updateChart('chartTemp',    s.max_temp_c || []);
+    updateChart('chartDisk',    s.disk_io || []);
+    updateChart('chartNetRx',   s.net_rx || []);
+    updateChart('chartNetTx',   s.net_tx || []);
+    updateChart('chartGpuUtil', s.gpu_util || []);
+    updateChart('chartGpuTemp', s.gpu_max_temp_c || []);
+    updateChart('chartGpuMem',  s.gpu_mem_used || []);
+  }
+
+  async function refreshDetail() {
+    try {
+      const d = await fetchDetail();
+      if (d) renderDetail(d);
     } catch (e) {
       console.error('主机详情加载失败:', e);
     }
   }
 
-  refresh();
-  setInterval(refresh, 10000);
+  async function refreshTimeseries() {
+    const ts = await fetchTimeseries();
+    renderTimeseries(ts);
+  }
+
+  refreshDetail();
+  refreshTimeseries();
+  setInterval(refreshDetail, 10000);
+  setInterval(refreshTimeseries, 10000);
 </script>
 {% endblock %}

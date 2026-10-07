@@ -96,9 +96,14 @@ def q_cluster_max_temp(cluster_id: str) -> str:
 
 
 def q_node_cpu_usage(instance: str) -> str:
-    """单节点 CPU 使用率（1m 窗口）。"""
+    """单节点 CPU 平均使用率（1m 窗口，跨所有核）。
+
+    标准写法：每个 mode 先在 by(cpu) 维度上聚合，再按 instance 取平均。
+    避免 `1 - a - b` 在多 series 标签不对齐时返回空。
+    """
     return (
-        f'1 - avg by(instance) (sum by(instance,cpu) (rate(node_cpu_seconds_total{{instance="{instance}",mode="idle",cpu!=""}}[1m])))'
+        f'1 - avg by(instance) (rate(node_cpu_seconds_total{{instance="{instance}",mode="idle",cpu!=""}}[1m]))'
+        f' - avg by(instance) (rate(node_cpu_seconds_total{{instance="{instance}",mode="iowait",cpu!=""}}[1m]))'
     )
 
 def q_node_load1(instance: str) -> str:
@@ -139,6 +144,57 @@ def q_node_network_rx(instance: str) -> str:
 
 def q_node_network_tx(instance: str) -> str:
     return f'sum(rate(node_network_transmit_bytes_total{{instance="{instance}"}}[5m]))'
+
+
+# ===== GPU（DCGM_FI_DEV_*，由 collector/gpu_collector.py 上报）=====
+# collector 暴露的 GPU 指标命名遵循 DCGM 标准，标签含 gpu/UUID/pci_bus_id/device/
+# modelName/hostname/DCGM_FI_DRIVER_VERSION。集群聚合需要 scrape config 注入 cluster
+# 标签；未注入则返回空，调用端按 null 展示。
+# 单机 GPU 卡数用 `count by(cluster) (DCGM_FI_DEV_GPU_UTIL)`：每张卡至少上报一个 GPU_UTIL
+# 时间序列，因此计数即 GPU 卡数。利用率/温度用 `avg` / `max`。
+# 节点级过滤用 instance；要求 scrape 把 instance 注入到 DCGM 指标，否则走 hostname 兜底。
+
+Q_GPU_UTIL = "DCGM_FI_DEV_GPU_UTIL"
+Q_GPU_TEMP = "DCGM_FI_DEV_GPU_TEMP"
+Q_GPU_MEM_USED = "DCGM_FI_DEV_FB_USED"
+Q_GPU_MEM_TOTAL = "DCGM_FI_DEV_FB_FREE"  # 仅 free 不够；总显存需另行计算；用 used + free 兜底
+
+GPU_DEVICE_INFO = "DCGM_FI_DEV_GPU_UTIL"  # 占位：实际型号需 modelName 标签
+
+
+def q_cluster_gpu_count(cluster_id: str) -> str:
+    """集群 GPU 卡数（按 cluster 标签分组计数）。"""
+    return f'count by(cluster) (DCGM_FI_DEV_GPU_UTIL{{cluster="{cluster_id}"}})'
+
+
+def q_cluster_gpu_util(cluster_id: str) -> str:
+    """集群 GPU 平均利用率（%）。"""
+    return f'avg by(cluster) (DCGM_FI_DEV_GPU_UTIL{{cluster="{cluster_id}"}})'
+
+
+def q_cluster_gpu_temp(cluster_id: str) -> str:
+    """集群 GPU 最高温度（°C）。"""
+    return f'max by(cluster) (DCGM_FI_DEV_GPU_TEMP{{cluster="{cluster_id}"}})'
+
+
+def q_node_gpu_count(instance: str) -> str:
+    """单节点 GPU 卡数。"""
+    return f'count(DCGM_FI_DEV_GPU_UTIL{{instance="{instance}"}})'
+
+
+def q_node_gpu_util(instance: str) -> str:
+    """单节点 GPU 平均利用率（%）。"""
+    return f'avg(DCGM_FI_DEV_GPU_UTIL{{instance="{instance}"}})'
+
+
+def q_node_gpu_temp(instance: str) -> str:
+    """单节点 GPU 最高温度（°C）。"""
+    return f'max(DCGM_FI_DEV_GPU_TEMP{{instance="{instance}"}})'
+
+
+def q_node_gpu_mem_used(instance: str) -> str:
+    """单节点 GPU 显存已用总量（MiB）。"""
+    return f'sum(DCGM_FI_DEV_FB_USED{{instance="{instance}"}})'
 
 
 def load_cluster_locations(path: str | Path) -> dict[str, dict[str, Any]]:

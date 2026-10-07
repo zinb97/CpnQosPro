@@ -24,7 +24,28 @@
       "Bash(curl -sf -o /dev/null -w \"ECharts CDN HTTP %{http_code}\\\\n\" \"https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js\")",
       "Bash(xxd \"D:/Project/CpnQosPro/backen/config/cluster_locations.yaml\")",
       "Bash(./.venv/Scripts/python.exe -m py_compile app/main.py app/routers/api.py app/routers/resource.py app/routers/shells.py app/menu.py)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL\")",
+      "Bash(curl -s \"http://localhost:8080/api/metrics/hosts/192.168.11.11:9100/timeseries\")",
+      "Bash(curl -v \"http://localhost:8080/api/metrics/hosts/192.168.11.11:9100/timeseries\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL{instance=%22192.168.11.11:9100%22}\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL%7Binstance%3D%22192.168.11.11%3A9100%22%7D\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query?query=node_thermal_zone_temp%7Binstance%3D%22192.168.11.11%3A9100%22%7D\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query_range?query=max\\(node_thermal_zone_temp%7Binstance%3D%22192.168.11.11%3A9100%22%7D\\)&start=1791357000&end=1791361000&step=30s\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query_range?query=1%20-%20rate\\(node_cpu_seconds_total%7Binstance%3D%22192.168.11.11%3A9100%22%2Cmode%3D%22idle%22%2Ccpu!%3D%22%22%7D%5B1m%5D\\)%20-%20rate\\(node_cpu_seconds_total%7Binstance%3D%22192.168.11.11%3A9100%22%2Cmode%3D%22iowait%22%2Ccpu!%3D%22%22%7D%5B1m%5D\\)&start=1791357000&end=1791361000&step=30s\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query_range?query=1%20-%20rate\\(node_cpu_seconds_total%7Binstance%3D%22192.168.11.11%3A9100%22%2Cmode%3D%22idle%22%7D%5B1m%5D\\)%20-%20rate\\(node_cpu_seconds_total%7Binstance%3D%22192.168.11.11%3A9100%22%2Cmode%3D%22iowait%22%7D%5B1m%5D\\)&start=1791357000&end=1791361000&step=30s\")",
+      "Bash(curl -s \"http://192.168.10.31:9090/api/v1/query_range?query=rate\\(node_cpu_seconds_total%7Binstance%3D%22192.168.11.11%3A9100%22%2Cmode%3D%22idle%22%7D%5B1m%5D\\)&start=1791357000&end=1791361000&step=30s\")",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=1 - avg by\\(instance\\) \\(rate\\(node_cpu_seconds_total{instance=\"192.168.11.11:9100\",mode=\"idle\"}[1m]\\)\\) - avg by\\(instance\\) \\(rate\\(node_cpu_seconds_total{instance=\"192.168.11.11:9100\",mode=\"iowait\"}[1m]\\)\\)' --data-urlencode start=1791357000 --data-urlencode end=1791361000 --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=avg\\(DCGM_FI_DEV_GPU_UTIL{instance=\"192.168.11.11:9100\"}\\)' --data-urlencode start=1791357000 --data-urlencode end=1791361000 --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=max\\(DCGM_FI_DEV_GPU_TEMP{instance=\"192.168.11.11:9100\"}\\)' --data-urlencode start=1791357000 --data-urlencode end=1791361000 --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=sum\\(DCGM_FI_DEV_FB_USED{instance=\"192.168.11.11:9100\"}\\)' --data-urlencode start=1791357000 --data-urlencode end=1791361000 --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query --data-urlencode 'query=node_load1{instance=\"192.168.11.10:9100\"}')",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=node_load1{instance=\"192.168.11.10:9100\"}' --data-urlencode start=__CMDSUB_OUTPUT__ --data-urlencode end=__CMDSUB_OUTPUT__ --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=1 - node_memory_MemAvailable_bytes{instance=\"192.168.11.10:9100\"} / node_memory_MemTotal_bytes{instance=\"192.168.11.10:9100\"}' --data-urlencode start=__CMDSUB_OUTPUT__ --data-urlencode end=__CMDSUB_OUTPUT__ --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=1 - avg by\\(instance\\) \\(rate\\(node_cpu_seconds_total{instance=\"192.168.11.10:9100\",mode=\"idle\"}[1m]\\)\\) - avg by\\(instance\\) \\(rate\\(node_cpu_seconds_total{instance=\"192.168.11.10:9100\",mode=\"iowait\"}[1m]\\)\\)' --data-urlencode start=__CMDSUB_OUTPUT__ --data-urlencode end=__CMDSUB_OUTPUT__ --data-urlencode step=30s)",
+      "Bash(curl -sG http://192.168.10.31:9090/api/v1/query_range --data-urlencode 'query=max\\(node_thermal_zone_temp{instance=\"192.168.11.10:9100\"}\\)' --data-urlencode start=__CMDSUB_OUTPUT__ --data-urlencode end=__CMDSUB_OUTPUT__ --data-urlencode step=30s)",
+      "Bash(curl -sG \"http://192.168.10.31:8081/api/metrics/hosts/192.168.11.10%3A9100/timeseries\")",
+      "Bash(/d/Project/CpnQosPro/.venv/Scripts/python.exe -m py_compile app/routers/api.py)"
     ]
   }
 }
