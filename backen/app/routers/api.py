@@ -37,7 +37,9 @@ from app.prometheus.queries import (
     q_cluster_mem_total,
     q_cluster_mem_usage,
     q_node_boot_time,
+    q_node_cpu_cores,
     q_node_cpu_usage,
+    q_node_disk_size,
     q_node_disk_total,
     q_node_gpu_count,
     q_node_gpu_mem_used,
@@ -590,13 +592,24 @@ async def cluster_detail(cluster_id: str, request: Request) -> JSONResponse:
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)
 
 
+# 时序窗口预设：(时长, 步进)。前端通过 ?window= 选择。
+_WINDOW_PRESETS: dict[str, tuple[timedelta, str]] = {
+    "30m": (timedelta(minutes=30), "30s"),
+    "1h":  (timedelta(hours=1),    "1m"),
+    "6h":  (timedelta(hours=6),    "5m"),
+    "24h": (timedelta(hours=24),   "15m"),
+}
+
+
 @router.get("/hosts/{instance:path}/timeseries")
-async def host_timeseries(instance: str, request: Request) -> JSONResponse:
-    """主机实时指标时序（30m 窗口，30s 步进）。
+async def host_timeseries(instance: str, request: Request, window: str = "30m") -> JSONResponse:
+    """主机实时指标时序（窗口可调，默认 30m）。
 
     返回 11 个序列：cpu_usage / mem_usage / load1 / max_temp_c / procs_running /
     disk_io / net_rx / net_tx / gpu_util / gpu_max_temp_c / gpu_mem_used。
     每个序列均为 {time, value}[]，time 为 HH:MM:SS 字符串。
+
+    `window` 取值：30m / 1h / 6h / 24h；不识别时回退到 30m。
 
     同一指标可能按 cpu/gpu/disk/iface 分裂为多条 series（Prometheus 默认行为）；
     这里按时间戳对齐并按 metric 指定的聚合方式（avg/max/sum）合并为一个序列。
@@ -604,9 +617,10 @@ async def host_timeseries(instance: str, request: Request) -> JSONResponse:
     注意：本端点必须在 `/hosts/{instance:path}` 之前注册——FastAPI 按声明顺序匹配，
     否则 `:path` 贪婪匹配会把 `/timeseries` 一并吞进 instance。
     """
+    span, step = _WINDOW_PRESETS.get(window, _WINDOW_PRESETS["30m"])
     cli = _client(request)
     end = datetime.now()
-    start = end - timedelta(minutes=30)
+    start = end - span
 
     # (name, promql, 聚合方式)
     # avg : 多核/多卡/多温度区取平均
@@ -675,6 +689,13 @@ async def host_timeseries(instance: str, request: Request) -> JSONResponse:
         name: _agg_series(r, mode)
         for (name, _, mode), r in zip(metric_specs, raw)
     }
+    # 百分比类指标从 0~1 转换为 0~100（与 host_detail 中 _round_pct 一致）。
+    # 注：gpu_util 来源是 DCGM_FI_DEV_GPU_UTIL，本身已是 0~100，不需要再 *100。
+    for name in ("cpu_usage", "mem_usage"):
+        for p in series.get(name) or []:
+            v = p.get("value")
+            if isinstance(v, (int, float)):
+                p["value"] = round(v * 100, 1)
     return cache_response(
         {"instance": instance, "series": series},
         max_age=request.app.state.settings.charts_cache_s,
@@ -710,12 +731,13 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
 
     # 并发查询：8 类指标 + 3 个元指标 + 4 个 GPU 指标
     (
-        cpu, load1, mem_total, mem_avail, max_temp, procs,
-        boot_time, disk_io, net_rx, net_tx,
+        cpu, cpu_cores, load1, mem_total, mem_avail, max_temp, procs,
+        boot_time, disk_io, disk_size, net_rx, net_tx,
         uname_info, os_info, dmi_info,
         gpu_count, gpu_util, gpu_temp, gpu_mem_used,
     ) = await asyncio.gather(
         _safe_query(request, q_node_cpu_usage(instance)),
+        _safe_query(request, q_node_cpu_cores(instance)),
         _safe_query(request, q_node_load1(instance)),
         _safe_query(request, q_node_mem_total(instance)),
         _safe_query(request, q_node_mem_avail(instance)),
@@ -723,6 +745,7 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         _safe_query(request, q_node_procs_running(instance)),
         _safe_query(request, q_node_boot_time(instance)),
         _safe_query(request, q_node_disk_total(instance)),
+        _safe_query(request, q_node_disk_size(instance)),
         _safe_query(request, q_node_network_rx(instance)),
         _safe_query(request, q_node_network_tx(instance)),
         _safe_query(request, f'node_uname_info{{instance="{instance}"}}'),
@@ -765,6 +788,7 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
 
         # 实时指标
         "cpu_usage": _round_pct(_q(cpu)),
+        "cpu_cores": int(_q(cpu_cores)) if _q(cpu_cores) is not None else None,
         "load1": _round(_q(load1), 2),
         "mem_total_bytes": int(mem_total_v) if mem_total_v is not None else None,
         "mem_used_bytes": int(mem_used_v) if mem_used_v is not None else None,
@@ -773,6 +797,7 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         "procs_running": int(_q(procs)) if _q(procs) is not None else None,
         "boot_time": int(_q(boot_time)) if _q(boot_time) is not None else None,
         "disk_io_bytes_per_sec": _round(_q(disk_io), 0),
+        "disk_total_bytes": int(_q(disk_size)) if _q(disk_size) is not None else None,
         "net_rx_bytes_per_sec": _round(_q(net_rx), 0),
         "net_tx_bytes_per_sec": _round(_q(net_tx), 0),
 
@@ -786,5 +811,19 @@ async def host_detail(instance: str, request: Request) -> JSONResponse:
         "uname": _info(uname_info),
         "os": _info(os_info),
         "dmi": _info(dmi_info),
+
+        # 同集群其他主机（用于下拉框切换）。按 instance 排序。
+        "cluster_hosts": sorted(
+            [
+                {
+                    "instance": (t.get("labels") or {}).get("instance", ""),
+                    "health": t.get("health") or "unknown",
+                }
+                for t in node_targets
+                if (t.get("labels") or {}).get("cluster") == cid
+                and (t.get("labels") or {}).get("instance")
+            ],
+            key=lambda x: x["instance"],
+        ),
     }
     return cache_response(payload, max_age=request.app.state.settings.cards_cache_s)

@@ -95,15 +95,30 @@ def q_cluster_max_temp(cluster_id: str) -> str:
     return f'max by(cluster) (node_thermal_zone_temp{{cluster="{cluster_id}"}})'
 
 
+def q_node_cpu_cores(instance: str) -> str:
+    """单节点 CPU 核心数（系统模式 series 数）。"""
+    return (
+        f'count(node_cpu_seconds_total{{instance="{instance}",mode="system",cpu!=""}})'
+    )
+
+
+def q_node_disk_size(instance: str) -> str:
+    """单节点所有挂载点文件系统总容量（bytes）。"""
+    return (
+        f'sum(node_filesystem_size_bytes{{instance="{instance}",mountpoint!=""}})'
+    )
+
+
 def q_node_cpu_usage(instance: str) -> str:
     """单节点 CPU 平均使用率（1m 窗口，跨所有核）。
 
-    标准写法：每个 mode 先在 by(cpu) 维度上聚合，再按 instance 取平均。
-    避免 `1 - a - b` 在多 series 标签不对齐时返回空。
+    标准 CPU 利用率公式：CPU% = 1 - idle%。iowait 不应单独扣除——
+    iowait 表示 CPU 在等待 I/O 完成，但仍然消耗了 CPU 时间片，应算作"忙碌"。
+    这与 `top` / `node_exporter` 的算法一致。
     """
     return (
-        f'1 - avg by(instance) (rate(node_cpu_seconds_total{{instance="{instance}",mode="idle",cpu!=""}}[1m]))'
-        f' - avg by(instance) (rate(node_cpu_seconds_total{{instance="{instance}",mode="iowait",cpu!=""}}[1m]))'
+        f'1 - avg by(instance) '
+        f'(rate(node_cpu_seconds_total{{instance="{instance}",mode="idle",cpu!=""}}[1m]))'
     )
 
 def q_node_load1(instance: str) -> str:
