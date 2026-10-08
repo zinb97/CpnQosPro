@@ -72,7 +72,7 @@ class HostCollector:
             per_cpu: 是否读取每个 CPU 核心的详细数据，默认只读总计数据
         """
         self._data = {
-            'os_info': self._read_os_info(),
+            'os': self._read_os_info(),
             'dmi': self._read_dmi(),
             'uname': self._read_uname(),
             'cpu_stat': self._read_cpu_stat(per_cpu=per_cpu),
@@ -377,7 +377,7 @@ class HostCollector:
         data = self.collect(per_cpu=per_cpu)
         lines = []
         self._emit_info(lines, 'uname', data.get('uname', {}))
-        self._emit_info(lines, 'os_info', data.get('os_info', {}))
+        self._emit_info(lines, 'os', data.get('os', {}))
         self._emit_info(lines, 'dmi', data.get('dmi', {}))
         self._emit_cpu(lines, data.get('cpu_stat', {}), per_cpu)
         self._emit_loadavg(lines, data.get('loadavg', {}))
