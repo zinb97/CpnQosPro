@@ -4,14 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目结构
 
-仓库由两部分组成，**二者相对独立**：
+仓库由三个相对独立的部分组成：
 
-| 目录 | 作用 | 依赖 |
-|------|------|------|
-| `collector/` | Linux 主机 + GPU 指标采集，HTTP 暴露为 Prometheus 指标 | 纯标准库 + `pynvml`（**无第三方依赖**） |
-| `backen/` | FastAPI Dashboard，从 Prometheus 拉取指标并渲染 | FastAPI / uvicorn / httpx / jinja2 / pyyaml |
+| 目录 | 类型 | 作用 | 依赖 |
+|------|------|------|------|
+| `collector/` | 本仓库 | Linux 主机 + GPU 指标采集，HTTP 暴露为 Prometheus 指标 | 纯标准库 + `pynvml`（无第三方依赖） |
+| `backen/` | 本仓库 | FastAPI Dashboard，从 Prometheus 拉取指标并渲染 | FastAPI / uvicorn / httpx / jinja2 / pyyaml |
+| `QoSController/` | git 子模块 | RYU SDN 控制器 + Mininet 仿真，QoS 路由策略 | RYU / Mininet / gRPC / OpenFlow 1.3 |
 
-`backen/README.md` 含完整架构、API、环境变量与运行方式——**修改 `backen/` 前先读它**。本文件其余部分主要描述 `collector/`。
+子模块指向 `https://github.com/zinb97/QoSController.git`，首次克隆后需 `git submodule update --init`。`QoSController/CLAUDE.md` 自带完整架构、命令、指标列表与 DSCP 路由策略——**修改子模块前先读它**。
+
+`backen/README.md` 含 `backen/` 完整架构、API、环境变量与运行方式——**修改 `backen/` 前先读它**。本文件其余部分主要描述 `collector/`。
+
+## 端到端数据流
+
+```
+主机 (Linux + GPU)
+   └─ collector/metrics_exporter.py :9100/metrics
+        └─ Prometheus (默认 192.168.10.31:9090)
+             └─ backen/app/prometheus/client.py (PromQL 查询)
+                  └─ backen FastAPI :8080 (SSR + /api/metrics/* JSON)
+```
+
+`backen` **不直连** `collector`，必须经由 Prometheus。
+
+## 根目录的杂项
+
+仓库根目录有与项目无关的旧文件，**不要修改或引用**：
+- `main.py` — PyCharm 自动生成的样板（`print_hi`），非任何入口
+- `index.html` — 旧版独立 Dashboard（1154 行），无后端连接，已被 `backen/` 取代
 
 ---
 
@@ -29,8 +50,6 @@ HTTP 端点：
 - `/metrics` — Prometheus 文本格式
 - `/health` — 返回 `OK`
 - `/` — 带有链接的索引页
-
-仓库根目录存在 `.venv`；在 Windows 下通过 `.venv/Scripts/python.exe` 调用（依据 `.claude/settings.local.json`）。
 
 ## collector/ 代码结构
 
@@ -75,6 +94,4 @@ HTTP 端点：
   python -m py_compile collector/gpu_collector.py
   ```
 - `backen/`：见 `backen/README.md` 的「验证」段落。
-
-
-avg by(cluster) (1 - (rate(node_cpu_seconds_total{{cluster="{cluster_id}",mode="idle",cpu!=""}}[1m]) + rate(node_cpu_seconds_total{{cluster="{cluster_id}",mode="iowait",cpu!=""}}[1m])))
+- `QoSController/`：见 `QoSController/CLAUDE.md` 的「常用命令」段落。
